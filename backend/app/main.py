@@ -2,9 +2,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.auth import TokenVerifier, verifier_from_settings
+from app.api.modeling_routes import router as modeling_router
 from app.api.routes import router
 from app.config import get_settings
 from app.domain.access import AccessDenied, NotFoundInScope
+from app.domain.modeling import StaleUpdate
 from app.domain.tenancy import InvalidOperation
 
 
@@ -31,9 +33,26 @@ def create_app(token_verifier: TokenVerifier | None = None) -> FastAPI:
 
     @app.exception_handler(InvalidOperation)
     def _invalid(_: Request, exc: InvalidOperation) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+        return JSONResponse(
+            {"error": "invalid_operation", "detail": str(exc)},
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+    @app.exception_handler(StaleUpdate)
+    def _stale(_: Request, exc: StaleUpdate) -> JSONResponse:
+        return JSONResponse(
+            {
+                "error": "stale_update",
+                "detail": str(exc),
+                "record_id": str(exc.record_id),
+                "expected_seq": exc.expected_seq,
+                "current_seq": exc.current_seq,
+            },
+            status_code=status.HTTP_409_CONFLICT,
+        )
 
     app.include_router(router)
+    app.include_router(modeling_router)
     return app
 
 
