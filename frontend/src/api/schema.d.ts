@@ -762,6 +762,8 @@ export interface components {
             applied_seq: number | null;
             /** Base Seq */
             base_seq: number;
+            /** Blockers */
+            blockers: string[];
             /** Content */
             content: {
                 [key: string]: unknown;
@@ -783,11 +785,17 @@ export interface components {
             internal_checks: {
                 [key: string]: unknown;
             }[];
+            /** Issue Attempts */
+            issue_attempts: {
+                [key: string]: number;
+            };
             /**
              * Model Id
              * Format: uuid
              */
             model_id: string;
+            /** Ready For Review */
+            ready_for_review: boolean;
             /** Run Id */
             run_id: string | null;
             /** Stale */
@@ -798,6 +806,10 @@ export interface components {
             summary: string | null;
             /** Tables */
             tables: number;
+            /** Validation */
+            validation: {
+                [key: string]: unknown;
+            }[];
         };
         /** CandidateSummary */
         CandidateSummary: {
@@ -858,8 +870,15 @@ export interface components {
         };
         /** CheckData */
         CheckData: {
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
             /** Based On Seq */
             based_on_seq?: number | null;
+            /** Candidate Id */
+            candidate_id?: string | null;
             check_type: components["schemas"]["CheckType"];
             /** Evidence */
             evidence?: {
@@ -867,6 +886,13 @@ export interface components {
             }[];
             /** Impact */
             impact?: string | null;
+            /**
+             * Is Blocking
+             * @default false
+             */
+            is_blocking: boolean;
+            /** Issue Key */
+            issue_key?: string | null;
             /** Recommended Action */
             recommended_action?: string | null;
             status: components["schemas"]["CheckStatus"];

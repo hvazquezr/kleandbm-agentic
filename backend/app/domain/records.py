@@ -307,6 +307,13 @@ class CheckData(_Payload):
     recommended_action: str | None = Field(default=None, max_length=4000)
     # The changeset sequence the check was evaluated against (its dependency watermark).
     based_on_seq: int | None = None
+    # A stable name for the issue (e.g. "grain:fact_sales"), so correction attempts are counted
+    # per issue across rounds and episodes; renaming an issue doesn't restart its allowance.
+    issue_key: str | None = Field(default=None, max_length=200)
+    # A blocking finding that failed (or couldn't be verified) keeps the model out of Ready for Review.
+    is_blocking: bool = False
+    attempts: int = Field(default=0, ge=0)  # correction attempts made for this issue so far
+    candidate_id: uuid.UUID | None = None  # the design candidate that was reviewed
 
 
 PAYLOADS: dict[RecordType, type[_Payload]] = {

@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     # calls each consultation may make. Bounded so the exchange never becomes its own loop.
     architect_max_consultations: int = 3
     consultation_max_iterations: int = 8
+    # The Validator runs on a different model family than the Architect (spec §7): GPT-6 Astra
+    # by default, "anthropic" with claude-sonnet-5-5 as the interim. "none" skips review, and
+    # the model then stays Draft with validation unverified.
+    validator_agent_provider: str = "openai"  # "openai" | "anthropic" | "fake" | "none"
+    validator_agent_model: str = "gpt-6-astra"
+    validator_agent_effort: str = "high"
+    validator_max_iterations: int = 16  # model calls per review round
+    validator_max_rounds: int = 3  # correction rounds per review episode (Architect run)
+    validator_max_attempts_per_issue: int = 3  # carried across episodes
     agent_max_tokens: int = 16000
     # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
     agent_checkpoints: bool = True

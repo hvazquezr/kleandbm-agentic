@@ -176,6 +176,13 @@
             "title": "Base Seq",
             "type": "integer"
           },
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "content": {
             "additionalProperties": true,
             "title": "Content",
@@ -213,10 +220,21 @@
             "title": "Internal Checks",
             "type": "array"
           },
+          "issue_attempts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Issue Attempts",
+            "type": "object"
+          },
           "model_id": {
             "format": "uuid",
             "title": "Model Id",
             "type": "string"
+          },
+          "ready_for_review": {
+            "title": "Ready For Review",
+            "type": "boolean"
           },
           "run_id": {
             "anyOf": [
@@ -252,6 +270,14 @@
           "tables": {
             "title": "Tables",
             "type": "integer"
+          },
+          "validation": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Validation",
+            "type": "array"
           }
         },
         "required": [
@@ -267,6 +293,10 @@
           "created_at",
           "content",
           "internal_checks",
+          "validation",
+          "issue_attempts",
+          "ready_for_review",
+          "blockers",
           "diff",
           "stale"
         ],
@@ -467,6 +497,12 @@
       "CheckData": {
         "additionalProperties": false,
         "properties": {
+          "attempts": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Attempts",
+            "type": "integer"
+          },
           "based_on_seq": {
             "anyOf": [
               {
@@ -477,6 +513,18 @@
               }
             ],
             "title": "Based On Seq"
+          },
+          "candidate_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
           },
           "check_type": {
             "$ref": "#/components/schemas/CheckType"
@@ -500,6 +548,23 @@
               }
             ],
             "title": "Impact"
+          },
+          "is_blocking": {
+            "default": false,
+            "title": "Is Blocking",
+            "type": "boolean"
+          },
+          "issue_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Key"
           },
           "recommended_action": {
             "anyOf": [

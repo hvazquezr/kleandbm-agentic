@@ -15,6 +15,11 @@ Workspace content (JSON):
   mappings:      [{requirement_id, elements: ["table" | "table.attribute"], note}]
   decision_links:[{decision_id, elements: [...]}]
   removed:       [{record_id, base_seq, type, label}]   existing elements the candidate drops
+
+Validation (P4c) lives beside the content: `validation` holds the Validator's review rounds,
+and `issue_attempts` counts correction attempts per issue key across episodes. The last
+round's findings are written as CHECK records in the same changeset as the candidate, and
+the model becomes Ready for Review only when nothing blocks it (`readiness`).
 """
 
 import copy
@@ -26,15 +31,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain import modeling
-from app.domain.access import NotFoundInScope, Permission, ProjectScope
+from app.domain.access import ActorKind, NotFoundInScope, Permission, ProjectScope
 from app.domain.modeling import CreateOp, DeleteOp, LinkOp, UpdateOp
 from app.domain.records import (
     Additivity,
     AttributeRole,
     Cardinality,
+    CheckStatus,
     FeasibilityStatus,
     LinkType,
     LogicalType,
+    ModelState,
     RecordType,
     ScdType,
     TableKind,
@@ -65,10 +72,16 @@ def start_candidate(
     """A new workspace seeded from the model as it is now."""
     scope.require(Permission.PROJECT_EDIT)
     snapshot = modeling.get_snapshot(session, scope, model_id)
+    previous = session.scalar(
+        select(DesignCandidate).where(DesignCandidate.project_id == scope.project_id,
+                                      DesignCandidate.model_id == model_id)
+        .order_by(DesignCandidate.created_at.desc()).limit(1))
     candidate = DesignCandidate(
         tenant_id=scope.tenant_id, project_id=scope.project_id, model_id=model_id, run_id=run_id,
         status=CandidateStatus.BUILDING, base_seq=snapshot.as_of_seq, content=_seed(snapshot),
-        internal_checks=[], created_by=_user(scope),
+        internal_checks=[], validation=[], created_by=_user(scope),
+        # Per-issue correction allowances carry across review episodes (spec §7).
+        issue_attempts=dict(previous.issue_attempts or {}) if previous else {},
     )
     session.add(candidate)
     session.flush()
@@ -546,6 +559,7 @@ def plan_changes(session: Session, scope: ProjectScope, candidate: DesignCandida
         else:
             ops.append(CreateOp(type=RecordType.RELATIONSHIP, ref=f"r{ri}", data=data))
             diff["added"].append(f"relationship {_rel_label(r)}")
+        ids[_key(_rel_label(r))] = uuid.UUID(r["record_id"]) if r.get("record_id") else f"$r{ri}"
 
     existing_links = {(l.from_id, l.to_id, l.link_type) for l in modeling.list_live_links(session, scope)}
     for group, link_type, owner in (("mappings", LinkType.MAPS_TO, "requirement_id"),
@@ -558,7 +572,109 @@ def plan_changes(session: Session, scope: ProjectScope, candidate: DesignCandida
                     continue
                 ops.append(LinkOp(from_id=source, to_id=target, link_type=link_type))
                 existing_links.add((source, target, link_type))
+
+    # The last review's findings replace the model's previous validation checks.
+    findings = latest_findings(candidate)
+    if findings is not None:
+        for old in modeling.get_snapshot(session, scope, candidate.model_id).records[RecordType.CHECK]:
+            ops.append(DeleteOp(id=old.id, expected_seq=old.seq))
+        requirement_ids = {str(r.id) for r in modeling._latest(session, scope, RecordType.REQUIREMENT,
+                                                                 as_of=modeling.current_seq(session, scope))}
+        for fi, f in enumerate(findings):
+            ops.append(CreateOp(type=RecordType.CHECK, ref=f"c{fi}", data=_check_data(candidate, f)))
+            targets = [ids.get(_key(e)) for e in f.get("elements") or []]
+            targets += [uuid.UUID(r) for r in f.get("requirement_ids") or [] if r in requirement_ids]
+            targets += [uuid.UUID(q) for q in f.get("question_ids") or []]  # the open question it rests on
+            for target in dict.fromkeys(t for t in targets if t is not None):
+                ops.append(LinkOp(from_id=f"$c{fi}", to_id=target, link_type=LinkType.CHECKS))
+        failed = sum(1 for f in findings if f["status"] != CheckStatus.PASSED.value)
+        diff["added"].append(f"{len(findings)} validation checks ({failed} not passed)")
     return ops, diff
+
+
+def _check_data(candidate: DesignCandidate, f: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "check_type": f["check_type"], "status": f["status"], "summary": f["summary"],
+        "evidence": f.get("evidence") or [], "impact": f.get("impact"),
+        "recommended_action": f.get("recommended_action"), "based_on_seq": candidate.base_seq,
+        "issue_key": f["issue_key"], "is_blocking": bool(f.get("is_blocking")),
+        "attempts": int((candidate.issue_attempts or {}).get(f["issue_key"], 0)), "candidate_id": candidate.id,
+    }
+
+
+# --- Validation -----------------------------------------------------------------------------
+
+
+def latest_findings(candidate: DesignCandidate) -> list[dict[str, Any]] | None:
+    """Findings of the last completed review round, or None if the Validator hasn't reviewed it."""
+    done = [r for r in candidate.validation or [] if r.get("status") == "completed"]
+    return done[-1]["findings"] if done else None
+
+
+def readiness(candidate: DesignCandidate) -> tuple[bool, list[str]]:
+    """Whether applying the candidate may mark the model Ready for Review, and what blocks it:
+    failed hard internal checks, blocking findings that failed or couldn't be verified, or no
+    completed review at all (an unreviewed design is unverified, never a pass)."""
+    blockers = [f"{c['name']}: {c['summary']}" for c in hard_failures(candidate.internal_checks or [])]
+    findings = latest_findings(candidate)
+    if findings is None:
+        blockers.append("validation: the Validator hasn't reviewed this design")
+    else:
+        blockers += [f"{f['issue_key']}: {f['summary']}" for f in findings
+                     if f.get("is_blocking") and f["status"] != CheckStatus.PASSED.value]
+    return not blockers, blockers
+
+
+def user_edited_elements(session: Session, scope: ProjectScope, candidate: DesignCandidate) -> set[str]:
+    """Labels ("table", "table.attribute", relationship label) of existing elements whose
+    current revision was written by a person. Findings on these become questions to the user,
+    never automatic corrections (spec §7)."""
+    labels: dict[int, list[str]] = {}
+    for t in candidate.content["tables"]:
+        if t.get("record_id"):
+            labels.setdefault(t["base_seq"], []).append(_key(t["name"]))
+        for a in t["attributes"]:
+            if a.get("record_id"):
+                labels.setdefault(a["base_seq"], []).append(f"{_key(t['name'])}.{_key(a['name'])}")
+    for r in candidate.content["relationships"]:
+        if r.get("record_id"):
+            labels.setdefault(r["base_seq"], []).append(_key(_rel_label(r)))
+    if not labels:
+        return set()
+    by_people = set(session.scalars(select(Changeset.seq).where(
+        Changeset.project_id == scope.project_id, Changeset.seq.in_(list(labels)),
+        Changeset.actor_kind == ActorKind.USER)))
+    return {label for seq in by_people for label in labels[seq]}
+
+
+def finding_targets_user_edits(finding: dict[str, Any], user_edited: set[str]) -> bool:
+    """A finding concerns a person's edit if it names a user-edited element."""
+    return any(_key(e) in user_edited for e in finding.get("elements") or [])
+
+
+def element_labels(content: dict[str, Any]) -> set[str]:
+    """Every label a finding may name: "table", "table.attribute", relationship labels."""
+    out = set()
+    for t in content["tables"]:
+        out.add(_key(t["name"]))
+        out.update(f"{_key(t['name'])}.{_key(a['name'])}" for a in t["attributes"])
+    out.update(_key(_rel_label(r)) for r in content["relationships"])
+    return out
+
+
+def element_record_ids(content: dict[str, Any]) -> dict[str, uuid.UUID]:
+    """Labels of elements that already exist in the model, with their record ids."""
+    out: dict[str, uuid.UUID] = {}
+    for t in content["tables"]:
+        if t.get("record_id"):
+            out[_key(t["name"])] = uuid.UUID(t["record_id"])
+        for a in t["attributes"]:
+            if a.get("record_id"):
+                out[f"{_key(t['name'])}.{_key(a['name'])}"] = uuid.UUID(a["record_id"])
+    for r in content["relationships"]:
+        if r.get("record_id"):
+            out[_key(_rel_label(r))] = uuid.UUID(r["record_id"])
+    return out
 
 
 def apply_candidate(session: Session, scope: ProjectScope, candidate_id: uuid.UUID) -> DesignCandidate:
@@ -581,6 +697,11 @@ def apply_candidate(session: Session, scope: ProjectScope, candidate_id: uuid.UU
     candidate.status = CandidateStatus.APPLIED
     candidate.applied_by = _user(scope)
     candidate.applied_at = datetime.now(UTC)
+    ready, _ = readiness(candidate)
+    if ready and candidate.applied_seq:
+        # Readiness, never acceptance: only a person with approval authority accepts.
+        modeling.set_state(session, scope, candidate.model_id, ModelState.READY_FOR_REVIEW,
+                           note=f"Validated design candidate {candidate.id}")
     session.flush()
     return candidate
 

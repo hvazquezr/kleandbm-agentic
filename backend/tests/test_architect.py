@@ -9,7 +9,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import select
 
-from app.adapters.llm import ScriptedChatModel
+from app.adapters.llm import LLMError, ScriptedChatModel
 from app.config import get_settings
 from app.domain import design, modeling, tenancy
 from app.domain.access import Actor, ActorKind
@@ -58,18 +58,29 @@ def proj(as_user, client, monkeypatch):
     p.revenue_req, p.profit_req = req["created"]["r"], req["created"]["p"]
     p.conv = alice.post(f"{base}/conversations", json={"model_id": model, "agent": "architect"}).json()
 
+    def factory_for(models):
+        def factory(agent):
+            if agent not in models:
+                raise LLMError(f"no model is configured for the {agent} agent")
+            return models[agent]
+        return factory
+
     def script(*steps):
+        # The Architect and the Business Requirements subgraph share one script; no Validator.
         m = ScriptedChatModel(list(steps))
-        client.app.state.chat_model_factory = lambda *_: m
+        client.app.state.chat_model_factory = factory_for({"architect": m, "business_requirements": m})
         return m
 
     def run(text="Design the model"):
         return sse(alice.post(f"{base}/conversations/{p.conv['id']}/messages", json={"text": text}))
 
-    def script_agents(architect_steps, requirements_steps):
+    def script_agents(architect_steps, requirements_steps=(), validator_steps=None):
         a, b = ScriptedChatModel(list(architect_steps)), ScriptedChatModel(list(requirements_steps))
-        client.app.state.chat_model_factory = lambda agent: {"architect": a, "business_requirements": b}[agent]
-        return a, b
+        models = {"architect": a, "business_requirements": b}
+        if validator_steps is not None:
+            models["validator"] = ScriptedChatModel(list(validator_steps))
+        client.app.state.chat_model_factory = factory_for(models)
+        return a, b, models.get("validator")
 
     p.script, p.run, p.script_agents = script, run, script_agents
     return p
@@ -172,7 +183,7 @@ def test_partial_draft_with_failed_hard_checks_is_applied_but_flagged(proj):
     grain = next(c for c in cand["internal_checks"] if c["name"] == "fact_grain_declared")
     assert grain["status"] == "failed" and grain["elements"] == ["fact_sales"]
     reply = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]["text"]
-    assert "stays a Draft" in reply
+    assert "stays a **Draft**" in reply
     state = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()["state"]
     assert state["effective_state"] == "draft"
 
@@ -359,7 +370,7 @@ def test_architect_consults_requirements_and_gets_a_documented_answer(proj, db_s
         seen["result"] = last_result(t)
         return {"text": "Noted the definition."}
 
-    architect, requirements = proj.script_agents(
+    architect, requirements, _ = proj.script_agents(
         [{"tool_calls": [_ask(proj)]}, capture],
         [{"tool_calls": [{"name": "get_registers", "input": {}}]},
          {"tool_calls": [{"name": "record_definition", "input": NET_REVENUE}]},

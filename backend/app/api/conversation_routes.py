@@ -158,12 +158,17 @@ def send_message(
 
     agent = conversation.agent
     box = get_box() if agent == "architect" and settings.secrets_key else None
-    requirements_model = None
-    if agent == "architect":  # drives the Business Requirements subgraph behind ask_requirements
-        try:
-            requirements_model = request.app.state.chat_model_factory("business_requirements")
+    requirements_model = validator_model = validator_unavailable = None
+    if agent == "architect":
+        factory = request.app.state.chat_model_factory
+        try:  # drives the Business Requirements subgraph behind ask_requirements
+            requirements_model = factory("business_requirements")
         except LLMError:
             requirements_model = None
+        try:  # the Validator reviews the candidate on a different model family
+            validator_model = factory("validator")
+        except LLMError as exc:
+            validator_unavailable = str(exc)
 
     def worker() -> None:
         try:
@@ -176,6 +181,9 @@ def send_message(
                     checkpointer=_checkpointer(app_state), store=app_state.object_store,
                     requirements_model=requirements_model, max_consultations=settings.architect_max_consultations,
                     consultation_max_iterations=settings.consultation_max_iterations,
+                    validator_model=validator_model, validator_unavailable=validator_unavailable,
+                    validator_max_iterations=settings.validator_max_iterations,
+                    max_rounds=settings.validator_max_rounds, max_attempts=settings.validator_max_attempts_per_issue,
                 )
             else:
                 run_turn(

@@ -36,6 +36,13 @@ class CandidateDiff(BaseModel):
 class CandidateOut(CandidateSummary):
     content: dict[str, Any]
     internal_checks: list[dict[str, Any]]
+    # Validator review rounds (findings with status, evidence, impact, recommended action) and
+    # correction attempts per issue key.
+    validation: list[dict[str, Any]]
+    issue_attempts: dict[str, int]
+    # Whether applying it would make the model Ready for Review, and what blocks that.
+    ready_for_review: bool
+    blockers: list[str]
     # What applying would change in the live model; null once applied or discarded.
     diff: CandidateDiff | None
     stale: bool
@@ -57,7 +64,10 @@ def _full(session, scope, c: DesignCandidate) -> CandidateOut:
     if open_ and not stale:
         _, d = design.plan_changes(session, scope, c)
         diff = CandidateDiff(**d)
-    return CandidateOut(**_summary(c), content=c.content, internal_checks=c.internal_checks or [], diff=diff, stale=stale)
+    ready, blockers = design.readiness(c)
+    return CandidateOut(**_summary(c), content=c.content, internal_checks=c.internal_checks or [],
+                        validation=c.validation or [], issue_attempts=c.issue_attempts or {},
+                        ready_for_review=ready, blockers=blockers, diff=diff, stale=stale)
 
 
 @router.get("/models/{model_id}/candidates")

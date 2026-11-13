@@ -29,6 +29,7 @@ from app.domain.records import (
     FeasibilityStatus,
     LinkType,
     LogicalType,
+    QuestionStatus,
     RecordType,
     ScdType,
     TableKind,
@@ -56,10 +57,18 @@ class ArchitectContext(ToolContext):
     max_consultations: int = 3
     consultation_max_iterations: int = 8
     consultations: list[dict[str, Any]] = field(default_factory=list)
+    # Person-edited elements a Validator finding targets: during correction they become
+    # questions to the user, never automatic corrections (spec §7), so edits are refused.
+    protected: set[str] = field(default_factory=set)
 
     def requirements(self) -> list[modeling.RecordView]:
         seq = modeling.current_seq(self.session, self.scope)
         return modeling._latest(self.session, self.scope, RecordType.REQUIREMENT, as_of=seq)
+
+    def open_questions(self) -> list[modeling.RecordView]:
+        seq = modeling.current_seq(self.session, self.scope)
+        return [q for q in modeling._latest(self.session, self.scope, RecordType.QUESTION, as_of=seq)
+                if str(q.data.get("status")) == QuestionStatus.OPEN.value]
 
 
 # --- Specs ----------------------------------------------------------------------------------
@@ -281,7 +290,21 @@ def _checks_note(ctx: ArchitectContext) -> list[str]:
     return [f"{c['name']}: {c['summary']}" for c in ctx.candidate.internal_checks if c["status"] == "failed"]
 
 
+def _guard(ctx: ArchitectContext, labels: list[str]) -> None:
+    hit = sorted({design._key(lab) for lab in labels} & ctx.protected)
+    if hit:
+        raise ToolInputError(f"a person edited {', '.join(hit)} and a Validator finding concerns it; don't change "
+                             "it: the finding is raised as a question for the person")
+
+
+def _table_labels(ctx: ArchitectContext, name: str) -> list[str]:
+    key = design._key(name)
+    return [key] + [p for p in ctx.protected if p.startswith(f"{key}.")]
+
+
 def put_table(ctx: ArchitectContext, args: dict) -> dict:
+    _guard(ctx, _table_labels(ctx, args["name"]) + (_table_labels(ctx, args["previous_name"])
+                                                    if _none_if_empty(args.get("previous_name")) else []))
     table = {
         "name": args["name"], "previous_name": _none_if_empty(args.get("previous_name")), "kind": args["kind"],
         "grain": _none_if_empty(args.get("grain")), "description": _none_if_empty(args.get("description")),
@@ -301,6 +324,7 @@ def put_table(ctx: ArchitectContext, args: dict) -> dict:
 def put_relationships(ctx: ArchitectContext, args: dict) -> dict:
     rels = [{**r, "role_name": _none_if_empty(r.get("role_name")), "description": _none_if_empty(r.get("description"))}
             for r in args.get("relationships") or []]
+    _guard(ctx, [design._rel_label(r) for r in rels])
     try:
         labels = design.put_relationships(ctx.candidate, rels, ctx.requirements())
     except (InvalidOperation, ValueError) as exc:
@@ -310,6 +334,7 @@ def put_relationships(ctx: ArchitectContext, args: dict) -> dict:
 
 
 def remove_element(ctx: ArchitectContext, args: dict) -> dict:
+    _guard(ctx, _table_labels(ctx, args["name"]) if args["kind"] == "table" else [args["name"]])
     try:
         if args["kind"] == "table":
             design.remove_table(ctx.candidate, args["name"], ctx.requirements())

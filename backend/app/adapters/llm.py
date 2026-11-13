@@ -189,6 +189,107 @@ class AnthropicChatModel:
         )
 
 
+# --- OpenAI ---------------------------------------------------------------------------------
+
+
+class OpenAIChatModel:
+    """OpenAI models via the Responses API (the Validator runs on a different model family than
+    the Architect, spec §7). Stateless: store=false, with encrypted reasoning items included so
+    they can be replayed unchanged within a run, like Claude's thinking blocks."""
+
+    def __init__(self, api_key: str, model: str, effort: str, max_tokens: int) -> None:
+        import openai
+
+        if not api_key:
+            raise LLMError("KLEANDBM_OPENAI_API_KEY is not set; add it to backend/.env")
+        self._client = openai.OpenAI(api_key=api_key)
+        self._openai = openai
+        self.model = model
+        self.effort = effort
+        self.max_tokens = max_tokens
+
+    @staticmethod
+    def _tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
+        return [{"type": "function", "name": t.name, "description": t.description,
+                 "parameters": t.input_schema, "strict": t.strict} for t in tools]
+
+    @staticmethod
+    def _input(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for entry in transcript:
+            if entry["role"] == "user":
+                out.append({"role": "user", "content": entry["text"]})
+            elif entry["role"] == "assistant":
+                if entry.get("raw"):
+                    out.extend(entry["raw"])  # this provider's output items, replayed unchanged
+                else:
+                    out.append({"role": "assistant", "content": entry["text"] or "(no text)"})
+            elif entry["role"] == "tool":
+                for r in entry["results"]:
+                    content = r["content"]
+                    if r.get("is_error"):
+                        content = f"Error: {content}"
+                    out.append({"type": "function_call_output", "call_id": r["id"], "output": content})
+        return out
+
+    def complete(self, system, transcript, tools, on_text=None) -> AssistantTurn:
+        o = self._openai
+        try:
+            response = self._client.responses.create(
+                model=self.model,
+                instructions=system,
+                input=self._input(transcript),
+                tools=self._tools(tools),
+                reasoning={"effort": self.effort},
+                max_output_tokens=self.max_tokens,
+                store=False,
+                include=["reasoning.encrypted_content"],
+            )
+        except o.AuthenticationError as exc:
+            raise LLMError("the OpenAI API key was rejected") from exc
+        except o.PermissionDeniedError as exc:
+            raise LLMError(f"the OpenAI account can't use {self.model}") from exc
+        except o.RateLimitError as exc:
+            raise LLMError("rate limited by the OpenAI API; try again shortly") from exc
+        except o.APIStatusError as exc:
+            raise LLMError(f"OpenAI API error {exc.status_code}: {exc.message}") from exc
+        except o.APIConnectionError as exc:
+            raise LLMError("could not reach the OpenAI API") from exc
+
+        text_parts, calls, refused = [], [], False
+        for item in response.output:
+            if item.type == "message":
+                for part in item.content:
+                    if part.type == "output_text":
+                        text_parts.append(part.text)
+                    elif part.type == "refusal":
+                        refused = True
+                        text_parts.append(part.refusal)
+            elif item.type == "function_call":
+                try:
+                    args = json.loads(item.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                calls.append(ToolCall(item.call_id, item.name, args))
+        text = "".join(text_parts)
+        if on_text and text:
+            on_text(text)
+        incomplete = getattr(response.incomplete_details, "reason", None) if response.status == "incomplete" else None
+        if refused or incomplete == "content_filter":
+            stop = "refusal"
+        elif incomplete == "max_output_tokens":
+            stop = "max_tokens"
+        else:
+            stop = "tool_use" if calls else "end_turn"
+        u = response.usage
+        cached = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0 if u else 0
+        usage = Usage(input_tokens=(u.input_tokens if u else 0) or 0, output_tokens=(u.output_tokens if u else 0) or 0,
+                      cache_read_tokens=cached)
+        raw = [item.model_dump(mode="json", exclude_none=True) for item in response.output]
+        return AssistantTurn(text=text, tool_calls=calls, stop_reason=stop, usage=usage,
+                             model=response.model or self.model, raw=raw)
+
+
 # --- Scripted fake (tests) ------------------------------------------------------------------
 
 

@@ -56,6 +56,12 @@ class DesignCandidate(Base):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     # The Architect's own structural checks, recomputed whenever the candidate changes.
     internal_checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # Validator review rounds: [{round, run_id, status, summary, findings: [...]}]; round 0 is
+    # the first review, later rounds revalidate after a correction (spec §7).
+    validation: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # Correction attempts per issue key, carried across review episodes (Architect runs) on
+    # the same model: seeded from the model's previous candidate.
+    issue_attempts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, server_default="{}")
     summary: Mapped[str | None] = mapped_column(Text)
     applied_seq: Mapped[int | None] = mapped_column(Integer)
     applied_by: Mapped[uuid.UUID | None] = mapped_column()

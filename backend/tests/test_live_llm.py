@@ -1,9 +1,10 @@
-"""Live checks against the real Claude API. Opt-in (they cost money): pytest -m live_llm
-Requires KLEANDBM_ANTHROPIC_API_KEY."""
+"""Live checks against the real Claude and OpenAI APIs. Opt-in (they cost money):
+pytest -m live_llm. Requires KLEANDBM_ANTHROPIC_API_KEY; the Validator checks need
+KLEANDBM_OPENAI_API_KEY with access to the configured Validator model."""
 
 import pytest
 
-from app.adapters.llm import AnthropicChatModel, ToolSpec
+from app.adapters.llm import AnthropicChatModel, OpenAIChatModel, ToolSpec
 from app.config import get_settings
 
 pytestmark = pytest.mark.live_llm
@@ -79,6 +80,30 @@ def test_consultation_tool_definitions_are_accepted(model):
     assert turn.stop_reason in {"tool_use", "end_turn"}
 
 
+@pytest.fixture
+def validator_model():
+    s = get_settings()
+    if not s.openai_api_key:
+        pytest.skip("KLEANDBM_OPENAI_API_KEY not set")
+    return OpenAIChatModel(s.openai_api_key, s.validator_agent_model, "low", 4000)
+
+
+def test_validator_round_trip_and_tool_definitions(validator_model):
+    """The Validator's real tools are accepted, a strict call comes back, and the output items
+    (reasoning included) replay with the tool result."""
+    from app.agents.validator.prompt import SYSTEM_PROMPT
+    from app.agents.validator.tools import TOOL_SPECS
+
+    transcript = [{"role": "user", "text": "<review_brief>\nCall get_candidate to start the review.\n</review_brief>"}]
+    turn = validator_model.complete(SYSTEM_PROMPT, transcript, TOOL_SPECS)
+    assert turn.tool_calls and turn.tool_calls[0].name == "get_candidate", turn
+    assert turn.usage.input_tokens > 0
+    transcript += [turn.to_transcript(), {"role": "tool", "results": [
+        {"id": turn.tool_calls[0].id, "content": '{"tables": [], "relationships": []}', "is_error": False}]}]
+    again = validator_model.complete(SYSTEM_PROMPT, transcript, TOOL_SPECS)
+    assert again.stop_reason in {"tool_use", "end_turn"}
+
+
 def test_architect_designs_northstar_from_the_real_source(as_user, client, monkeypatch):
     """End to end on the real Northstar MySQL source: investigate, design, apply. Prints what it
     built for review; asserts only the invariants (applied, grains declared, evidence cited)."""
@@ -98,7 +123,20 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
     client.app.state.source_connector = StdioMySqlConnector(
         Path(__file__).resolve().parents[2] / "mcp", 5000, 30.0, 200_000)
     chat = AnthropicChatModel(s.anthropic_api_key, s.architect_agent_model, s.architect_agent_effort, s.agent_max_tokens)
-    client.app.state.chat_model_factory = lambda *_: chat
+    br = AnthropicChatModel(s.anthropic_api_key, s.requirements_agent_model, s.requirements_agent_effort, s.agent_max_tokens)
+    validator = None
+    if s.openai_api_key:  # the Validator runs on another model family; without a key it's skipped
+        validator = OpenAIChatModel(s.openai_api_key, s.validator_agent_model, s.validator_agent_effort,
+                                    s.agent_max_tokens)
+    models = {"architect": chat, "business_requirements": br, "validator": validator}
+
+    def factory(agent):
+        if models.get(agent) is None:
+            from app.adapters.llm import LLMError
+            raise LLMError(f"no model is configured for the {agent} agent")
+        return models[agent]
+
+    client.app.state.chat_model_factory = factory
 
     alice = as_user("auth0|alice")
     tenant = alice.post("/tenants", json={"name": "Northstar"}).json()["id"]
@@ -110,6 +148,12 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
                                               "password": NORTHSTAR_PASSWORD})
     assert src.status_code == 201, src.text
     alice.put(f"{base}/models/{model}/sources/{src.json()['id']}")
+    # The discovery workbook (two departments' net revenue figures) is what a consultation can
+    # answer from. Only this file: the README answer key and verification.json never go in.
+    workbook = Path(__file__).resolve().parents[2] / "retail-discovery" / "northstar-current-state-report.xlsx"
+    doc = alice.post(f"{base}/documents", files={"file": (workbook.name, workbook.read_bytes(),
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert doc.status_code == 201, doc.text
     alice.post(f"{base}/changesets", json={"operations": [
         {"op": "create", "type": "requirement", "data": {"statement": s_, "origin_kind": "user_statement"}}
         for s_ in ["Monthly net revenue by channel, store and product category",
@@ -120,6 +164,7 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
     events = [json.loads(l[6:]) for l in resp.text.splitlines() if l.startswith("data: ")]
     done = events[-1]
     tools = [e for e in events if e["type"] == "tool" and e["status"] != "started"]
+    alice = as_user("auth0|alice")  # a fresh token: the run outlasts the test token's 5 minutes
     print("\nRUN", json.dumps(done, indent=1))
     print("TOOLS", json.dumps([f"{t['status']}: {t['summary']}" for t in tools], indent=1))
 
@@ -133,8 +178,23 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
         print(f"DEC {d['code']} {d['data']['kind']}: {d['data']['statement']}")
     for q in snap["questions"]:
         print(f"Q {q['code']}: {q['data']['description']}")
+    for d in snap["definitions"]:
+        print(f"DEF {d['code']} {d['data']['provenance']}/{d['data']['confirmation_status']}: "
+              f"{d['data']['term']} ({d['data'].get('business_scope')}) — {d['data'].get('origin_ref')}")
+    runs = alice.get(f"{base}/agent-runs/{done['run']['id']}").json()
+    for cid in runs["child_run_ids"]:
+        c = alice.get(f"{base}/agent-runs/{cid}").json()
+        print(f"CONSULT {c['agent']} {c['status']} iters={c['iterations']} tools={c['tool_calls']} "
+              f"in={c['input_tokens']} out={c['output_tokens']} cache_read={c['cache_read_tokens']}")
     cand = alice.get(f"{base}/candidates/{done['candidate']['id']}").json()
     print("CHECKS", json.dumps([(c["name"], c["status"]) for c in cand["internal_checks"]]))
+    for rnd in cand["validation"]:
+        print(f"REVIEW round {rnd['round']} {rnd['status']} ({rnd['model']}): {rnd.get('summary') or rnd.get('detail')}")
+        for f in rnd["findings"]:
+            print(f"  FINDING {f['issue_key']} [{f['check_type']}] {f['status']}{' BLOCKING' if f['is_blocking'] else ''}"
+                  f": {f['summary']} | evidence={[e['kind'] for e in f['evidence']]} | fix={f.get('recommended_action')}")
+    print("ATTEMPTS", cand["issue_attempts"], "READY", cand["ready_for_review"], "BLOCKERS", cand["blockers"])
+    print("STATE", snap["state"])
     print("REPLY", alice.get(f"{base}/conversations/{conv['id']}/messages").json()[-1]["text"])
 
     assert done["status"] in {"completed", "stopped"}

@@ -310,6 +310,10 @@ class CheckRevision(RevisionMixin, Base):
     impact: Mapped[str | None] = mapped_column(Text)
     recommended_action: Mapped[str | None] = mapped_column(Text)
     based_on_seq: Mapped[int | None] = mapped_column(BigInteger)
+    issue_key: Mapped[str | None] = mapped_column(String(200))
+    is_blocking: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    candidate_id: Mapped[uuid.UUID | None] = mapped_column()
 
 
 REVISION_TABLES: dict[RecordType, type[RevisionMixin]] = {

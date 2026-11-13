@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.adapters.embeddings import Embedder, embedder_from_settings
-from app.adapters.llm import AnthropicChatModel, ChatModel, LLMError, ScriptedChatModel
+from app.adapters.llm import AnthropicChatModel, ChatModel, LLMError, OpenAIChatModel, ScriptedChatModel
 from app.adapters.sources import SourceConnector, StdioMySqlConnector
 from app.adapters.storage import ObjectStore, store_from_settings
 from app.adapters.vision import ImageDescriber, describer_from_settings
@@ -24,8 +24,16 @@ from app.domain.tenancy import InvalidOperation
 
 def _chat_model_from_settings(settings, agent: str = "business_requirements") -> ChatModel:
     """The chat model for one agent, from that agent's provider, model and effort settings."""
-    prefix = {"business_requirements": "requirements_agent", "architect": "architect_agent"}[agent]
+    prefix = {"business_requirements": "requirements_agent", "architect": "architect_agent",
+              "validator": "validator_agent"}[agent]
     provider = getattr(settings, f"{prefix}_provider")
+    if provider == "openai":
+        return OpenAIChatModel(
+            settings.openai_api_key, getattr(settings, f"{prefix}_model"),
+            getattr(settings, f"{prefix}_effort"), settings.agent_max_tokens,
+        )
+    if provider == "none":
+        raise LLMError(f"no model is configured for the {agent} agent")
     if provider == "anthropic":
         return AnthropicChatModel(
             settings.anthropic_api_key, getattr(settings, f"{prefix}_model"),
