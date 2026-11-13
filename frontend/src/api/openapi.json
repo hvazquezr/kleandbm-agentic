@@ -1,0 +1,3655 @@
+{
+  "components": {
+    "schemas": {
+      "Additivity": {
+        "enum": [
+          "additive",
+          "semi_additive",
+          "non_additive"
+        ],
+        "title": "Additivity",
+        "type": "string"
+      },
+      "AttributeData": {
+        "additionalProperties": false,
+        "properties": {
+          "additivity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Additivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_nullable": {
+            "default": true,
+            "title": "Is Nullable",
+            "type": "boolean"
+          },
+          "logical_type": {
+            "$ref": "#/components/schemas/LogicalType"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "ordinal": {
+            "default": 0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AttributeRole",
+            "default": "descriptive"
+          },
+          "table_id": {
+            "format": "uuid",
+            "title": "Table Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table_id",
+          "name",
+          "logical_type"
+        ],
+        "title": "AttributeData",
+        "type": "object"
+      },
+      "AttributeRole": {
+        "enum": [
+          "surrogate_key",
+          "natural_key",
+          "foreign_key",
+          "measure",
+          "degenerate_dimension",
+          "descriptive",
+          "scd_effective_from",
+          "scd_effective_to",
+          "scd_current_flag"
+        ],
+        "title": "AttributeRole",
+        "type": "string"
+      },
+      "Cardinality": {
+        "enum": [
+          "many_to_one",
+          "one_to_one",
+          "many_to_many"
+        ],
+        "title": "Cardinality",
+        "type": "string"
+      },
+      "ChangesetIn": {
+        "properties": {
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "create": "#/components/schemas/CreateOp",
+                  "delete": "#/components/schemas/DeleteOp",
+                  "link": "#/components/schemas/LinkOp",
+                  "unlink": "#/components/schemas/UnlinkOp",
+                  "update": "#/components/schemas/UpdateOp"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CreateOp"
+                },
+                {
+                  "$ref": "#/components/schemas/UpdateOp"
+                },
+                {
+                  "$ref": "#/components/schemas/DeleteOp"
+                },
+                {
+                  "$ref": "#/components/schemas/LinkOp"
+                },
+                {
+                  "$ref": "#/components/schemas/UnlinkOp"
+                }
+              ]
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "ChangesetIn",
+        "type": "object"
+      },
+      "ChangesetOut": {
+        "properties": {
+          "created": {
+            "additionalProperties": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Created",
+            "type": "object"
+          },
+          "created_links": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Created Links",
+            "type": "array"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq",
+          "created",
+          "created_links"
+        ],
+        "title": "ChangesetOut",
+        "type": "object"
+      },
+      "CheckData": {
+        "additionalProperties": false,
+        "properties": {
+          "based_on_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Based On Seq"
+          },
+          "check_type": {
+            "$ref": "#/components/schemas/CheckType"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "recommended_action": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended Action"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CheckStatus"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_type",
+          "status",
+          "summary"
+        ],
+        "title": "CheckData",
+        "type": "object"
+      },
+      "CheckStatus": {
+        "enum": [
+          "passed",
+          "failed",
+          "unverified"
+        ],
+        "title": "CheckStatus",
+        "type": "string"
+      },
+      "CheckType": {
+        "enum": [
+          "coverage",
+          "grain",
+          "keys_and_joins",
+          "measure_duplication",
+          "definition_consistency",
+          "conventions",
+          "assumptions"
+        ],
+        "title": "CheckType",
+        "type": "string"
+      },
+      "ConfirmationStatus": {
+        "enum": [
+          "unconfirmed",
+          "confirmed",
+          "rejected"
+        ],
+        "title": "ConfirmationStatus",
+        "type": "string"
+      },
+      "CreateOp": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "op": {
+            "const": "create",
+            "default": "create",
+            "title": "Op",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "CreateOp",
+        "type": "object"
+      },
+      "DecisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "alternatives": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DecisionKind"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "statement": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DecisionStatus",
+            "default": "proposed"
+          }
+        },
+        "required": [
+          "kind",
+          "statement"
+        ],
+        "title": "DecisionData",
+        "type": "object"
+      },
+      "DecisionKind": {
+        "enum": [
+          "decision",
+          "assumption"
+        ],
+        "title": "DecisionKind",
+        "type": "string"
+      },
+      "DecisionStatus": {
+        "enum": [
+          "proposed",
+          "confirmed",
+          "rejected",
+          "superseded"
+        ],
+        "title": "DecisionStatus",
+        "type": "string"
+      },
+      "DefinitionData": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "business_scope": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Scope"
+          },
+          "confirmation_status": {
+            "$ref": "#/components/schemas/ConfirmationStatus",
+            "default": "unconfirmed"
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DefinitionKind",
+            "default": "term"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin_ref": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Ref"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/DefinitionProvenance"
+          },
+          "term": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "provenance"
+        ],
+        "title": "DefinitionData",
+        "type": "object"
+      },
+      "DefinitionKind": {
+        "enum": [
+          "term",
+          "metric",
+          "concept"
+        ],
+        "title": "DefinitionKind",
+        "type": "string"
+      },
+      "DefinitionProvenance": {
+        "description": "Where the meaning came from. Distinct from whether a user has confirmed it.",
+        "enum": [
+          "documented",
+          "user_stated",
+          "inferred"
+        ],
+        "title": "DefinitionProvenance",
+        "type": "string"
+      },
+      "DeleteOp": {
+        "properties": {
+          "expected_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Seq"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "pattern": "^\\$[A-Za-z0-9_.-]{1,64}$",
+                "type": "string"
+              }
+            ],
+            "title": "Id"
+          },
+          "op": {
+            "const": "delete",
+            "default": "delete",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DeleteOp",
+        "type": "object"
+      },
+      "FeasibilityStatus": {
+        "enum": [
+          "not_assessed",
+          "fully_supported",
+          "partially_supported",
+          "unsupported"
+        ],
+        "title": "FeasibilityStatus",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoryOut": {
+        "properties": {
+          "actor_id": {
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "is_deleted": {
+            "title": "Is Deleted",
+            "type": "boolean"
+          },
+          "on_behalf_of": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Behalf Of"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq",
+          "is_deleted",
+          "data",
+          "actor_kind",
+          "actor_id",
+          "on_behalf_of",
+          "reason",
+          "created_at"
+        ],
+        "title": "HistoryOut",
+        "type": "object"
+      },
+      "ImpactOut": {
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "record": {
+            "$ref": "#/components/schemas/RecordAnyOut"
+          },
+          "via": {
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record",
+          "depth",
+          "via"
+        ],
+        "title": "ImpactOut",
+        "type": "object"
+      },
+      "LayoutIn": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "maxItems": 2000,
+            "title": "Positions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "positions"
+        ],
+        "title": "LayoutIn",
+        "type": "object"
+      },
+      "LinkOp": {
+        "properties": {
+          "from_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "pattern": "^\\$[A-Za-z0-9_.-]{1,64}$",
+                "type": "string"
+              }
+            ],
+            "title": "From Id"
+          },
+          "link_type": {
+            "$ref": "#/components/schemas/LinkType"
+          },
+          "op": {
+            "const": "link",
+            "default": "link",
+            "title": "Op",
+            "type": "string"
+          },
+          "to_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "pattern": "^\\$[A-Za-z0-9_.-]{1,64}$",
+                "type": "string"
+              }
+            ],
+            "title": "To Id"
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "link_type"
+        ],
+        "title": "LinkOp",
+        "type": "object"
+      },
+      "LinkOut": {
+        "properties": {
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "from_id": {
+            "format": "uuid",
+            "title": "From Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "link_type": {
+            "$ref": "#/components/schemas/LinkType"
+          },
+          "to_id": {
+            "format": "uuid",
+            "title": "To Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "from_id",
+          "to_id",
+          "link_type",
+          "created_seq"
+        ],
+        "title": "LinkOut",
+        "type": "object"
+      },
+      "LinkType": {
+        "enum": [
+          "uses_definition",
+          "maps_to",
+          "alternative_for",
+          "conflicts_with",
+          "concerns",
+          "affects",
+          "checks"
+        ],
+        "title": "LinkType",
+        "type": "string"
+      },
+      "LogicalType": {
+        "enum": [
+          "integer",
+          "decimal",
+          "text",
+          "boolean",
+          "date",
+          "timestamp",
+          "time"
+        ],
+        "title": "LogicalType",
+        "type": "string"
+      },
+      "MeOut": {
+        "properties": {
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "MetricDetails": {
+        "additionalProperties": false,
+        "description": "Unknown details stay None, which means explicitly unresolved (spec \u00a73).",
+        "properties": {
+          "aggregation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregation"
+          },
+          "exclusions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusions"
+          },
+          "formula": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "inclusions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inclusions"
+          },
+          "time_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Basis"
+          }
+        },
+        "title": "MetricDetails",
+        "type": "object"
+      },
+      "ModelCreate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ModelCreate",
+        "type": "object"
+      },
+      "ModelOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "ModelOut",
+        "type": "object"
+      },
+      "ModelState": {
+        "description": "Lifecycle states (spec \u00a74).",
+        "enum": [
+          "draft",
+          "ready_for_review",
+          "accepted"
+        ],
+        "title": "ModelState",
+        "type": "string"
+      },
+      "OriginKind": {
+        "enum": [
+          "user_statement",
+          "dashboard",
+          "report",
+          "spreadsheet",
+          "document",
+          "agent_inference",
+          "other"
+        ],
+        "title": "OriginKind",
+        "type": "string"
+      },
+      "Position": {
+        "properties": {
+          "record_id": {
+            "format": "uuid",
+            "title": "Record Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "record_id",
+          "x",
+          "y"
+        ],
+        "title": "Position",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectMemberSet": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/ProjectRole"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "ProjectMemberSet",
+        "type": "object"
+      },
+      "ProjectOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ProjectRole"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "name",
+          "description",
+          "role"
+        ],
+        "title": "ProjectOut",
+        "type": "object"
+      },
+      "ProjectRole": {
+        "enum": [
+          "viewer",
+          "editor",
+          "approver",
+          "owner"
+        ],
+        "title": "ProjectRole",
+        "type": "string"
+      },
+      "ProjectUpdate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "ProjectUpdate",
+        "type": "object"
+      },
+      "QuestionData": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "is_blocking": {
+            "default": false,
+            "title": "Is Blocking",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QuestionKind"
+          },
+          "proposed_action": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Action"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuestionStatus",
+            "default": "open"
+          }
+        },
+        "required": [
+          "kind",
+          "description"
+        ],
+        "title": "QuestionData",
+        "type": "object"
+      },
+      "QuestionKind": {
+        "enum": [
+          "clarification",
+          "contradiction",
+          "missing_information",
+          "validation_finding"
+        ],
+        "title": "QuestionKind",
+        "type": "string"
+      },
+      "QuestionStatus": {
+        "enum": [
+          "open",
+          "answered",
+          "resolved",
+          "deferred"
+        ],
+        "title": "QuestionStatus",
+        "type": "string"
+      },
+      "RecordAnyOut": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordAnyOut",
+        "type": "object"
+      },
+      "RecordOut_AttributeData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AttributeData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[AttributeData]",
+        "type": "object"
+      },
+      "RecordOut_CheckData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CheckData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[CheckData]",
+        "type": "object"
+      },
+      "RecordOut_DecisionData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DecisionData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[DecisionData]",
+        "type": "object"
+      },
+      "RecordOut_DefinitionData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DefinitionData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[DefinitionData]",
+        "type": "object"
+      },
+      "RecordOut_QuestionData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/QuestionData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[QuestionData]",
+        "type": "object"
+      },
+      "RecordOut_RelationshipData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RelationshipData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[RelationshipData]",
+        "type": "object"
+      },
+      "RecordOut_RequirementData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RequirementData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[RequirementData]",
+        "type": "object"
+      },
+      "RecordOut_TableData_": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_seq": {
+            "title": "Created Seq",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TableData"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecordType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "code",
+          "model_id",
+          "created_seq",
+          "seq",
+          "data"
+        ],
+        "title": "RecordOut[TableData]",
+        "type": "object"
+      },
+      "RecordType": {
+        "enum": [
+          "table",
+          "attribute",
+          "relationship",
+          "requirement",
+          "definition",
+          "question",
+          "decision",
+          "check"
+        ],
+        "title": "RecordType",
+        "type": "string"
+      },
+      "RelationshipData": {
+        "additionalProperties": false,
+        "properties": {
+          "cardinality": {
+            "$ref": "#/components/schemas/Cardinality",
+            "default": "many_to_one"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "from_attribute_id": {
+            "format": "uuid",
+            "title": "From Attribute Id",
+            "type": "string"
+          },
+          "from_table_id": {
+            "format": "uuid",
+            "title": "From Table Id",
+            "type": "string"
+          },
+          "role_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Name"
+          },
+          "to_attribute_id": {
+            "format": "uuid",
+            "title": "To Attribute Id",
+            "type": "string"
+          },
+          "to_table_id": {
+            "format": "uuid",
+            "title": "To Table Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_table_id",
+          "from_attribute_id",
+          "to_table_id",
+          "to_attribute_id"
+        ],
+        "title": "RelationshipData",
+        "type": "object"
+      },
+      "RequirementData": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_status": {
+            "$ref": "#/components/schemas/ConfirmationStatus",
+            "default": "unconfirmed"
+          },
+          "feasibility_notes": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feasibility Notes"
+          },
+          "feasibility_status": {
+            "$ref": "#/components/schemas/FeasibilityStatus",
+            "default": "not_assessed"
+          },
+          "is_proposed_alternative": {
+            "default": false,
+            "title": "Is Proposed Alternative",
+            "type": "boolean"
+          },
+          "origin_kind": {
+            "$ref": "#/components/schemas/OriginKind"
+          },
+          "origin_ref": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Ref"
+          },
+          "statement": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "origin_kind"
+        ],
+        "title": "RequirementData",
+        "type": "object"
+      },
+      "ScdType": {
+        "enum": [
+          "none",
+          "type_1",
+          "type_2"
+        ],
+        "title": "ScdType",
+        "type": "string"
+      },
+      "SnapshotOut": {
+        "properties": {
+          "as_of_seq": {
+            "title": "As Of Seq",
+            "type": "integer"
+          },
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_AttributeData_"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_CheckData_"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "current_seq": {
+            "title": "Current Seq",
+            "type": "integer"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_DecisionData_"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "definitions": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_DefinitionData_"
+            },
+            "title": "Definitions",
+            "type": "array"
+          },
+          "layout": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "title": "Layout",
+            "type": "array"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/LinkOut"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "model_id": {
+            "format": "uuid",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_QuestionData_"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_RelationshipData_"
+            },
+            "title": "Relationships",
+            "type": "array"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_RequirementData_"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateOut"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/RecordOut_TableData_"
+            },
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_id",
+          "as_of_seq",
+          "current_seq",
+          "state",
+          "tables",
+          "attributes",
+          "relationships",
+          "requirements",
+          "definitions",
+          "questions",
+          "decisions",
+          "checks",
+          "links",
+          "layout"
+        ],
+        "title": "SnapshotOut",
+        "type": "object"
+      },
+      "StateIn": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModelState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "StateIn",
+        "type": "object"
+      },
+      "StateOut": {
+        "properties": {
+          "changed_since_state": {
+            "title": "Changed Since State",
+            "type": "boolean"
+          },
+          "effective_state": {
+            "$ref": "#/components/schemas/ModelState"
+          },
+          "recorded_at_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At Seq"
+          },
+          "recorded_state": {
+            "$ref": "#/components/schemas/ModelState"
+          }
+        },
+        "required": [
+          "recorded_state",
+          "recorded_at_seq",
+          "effective_state",
+          "changed_since_state"
+        ],
+        "title": "StateOut",
+        "type": "object"
+      },
+      "TableData": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TableKind"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scd_type": {
+            "$ref": "#/components/schemas/ScdType",
+            "default": "none"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "TableData",
+        "type": "object"
+      },
+      "TableKind": {
+        "enum": [
+          "fact",
+          "dimension",
+          "bridge"
+        ],
+        "title": "TableKind",
+        "type": "string"
+      },
+      "TenantCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TenantCreate",
+        "type": "object"
+      },
+      "TenantMemberSet": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/TenantRole"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "TenantMemberSet",
+        "type": "object"
+      },
+      "TenantOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TenantRole"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ],
+        "title": "TenantOut",
+        "type": "object"
+      },
+      "TenantRole": {
+        "enum": [
+          "admin",
+          "member"
+        ],
+        "title": "TenantRole",
+        "type": "string"
+      },
+      "UnlinkOp": {
+        "properties": {
+          "link_id": {
+            "format": "uuid",
+            "title": "Link Id",
+            "type": "string"
+          },
+          "op": {
+            "const": "unlink",
+            "default": "unlink",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link_id"
+        ],
+        "title": "UnlinkOp",
+        "type": "object"
+      },
+      "UpdateOp": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "expected_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Seq"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "pattern": "^\\$[A-Za-z0-9_.-]{1,64}$",
+                "type": "string"
+              }
+            ],
+            "title": "Id"
+          },
+          "op": {
+            "const": "update",
+            "default": "update",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "data"
+        ],
+        "title": "UpdateOp",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VersionCreate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "VersionCreate",
+        "type": "object"
+      },
+      "VersionOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "name",
+          "description",
+          "created_by",
+          "created_at"
+        ],
+        "title": "VersionOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "KleanDBM API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "me_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/tenants": {
+      "get": {
+        "operationId": "list_tenants_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TenantOut"
+                  },
+                  "title": "Response List Tenants Tenants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tenants",
+        "tags": [
+          "tenants"
+        ]
+      },
+      "post": {
+        "operationId": "create_tenant_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Tenant",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/members/{user_id}": {
+      "put": {
+        "operationId": "set_tenant_member_tenants__tenant_id__members__user_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantMemberSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Tenant Member",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects": {
+      "get": {
+        "operationId": "list_projects_tenants__tenant_id__projects_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOut"
+                  },
+                  "title": "Response List Projects Tenants  Tenant Id  Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Projects",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_project_tenants__tenant_id__projects_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}": {
+      "get": {
+        "operationId": "get_project_tenants__tenant_id__projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project",
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_project_tenants__tenant_id__projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/changesets": {
+      "post": {
+        "operationId": "apply_changeset_tenants__tenant_id__projects__project_id__changesets_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangesetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Changeset",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/members/{user_id}": {
+      "put": {
+        "operationId": "set_project_member_tenants__tenant_id__projects__project_id__members__user_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectMemberSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Project Member",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models": {
+      "get": {
+        "operationId": "list_models_tenants__tenant_id__projects__project_id__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelOut"
+                  },
+                  "title": "Response List Models Tenants  Tenant Id  Projects  Project Id  Models Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Models",
+        "tags": [
+          "modeling"
+        ]
+      },
+      "post": {
+        "operationId": "create_model_tenants__tenant_id__projects__project_id__models_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Model",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/layout": {
+      "put": {
+        "operationId": "set_layout_tenants__tenant_id__projects__project_id__models__model_id__layout_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LayoutIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Layout",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/snapshot": {
+      "get": {
+        "operationId": "get_snapshot_tenants__tenant_id__projects__project_id__models__model_id__snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Changeset seq watermark; default latest",
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Changeset seq watermark; default latest",
+              "title": "As Of"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Snapshot",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state": {
+      "get": {
+        "operationId": "get_state_tenants__tenant_id__projects__project_id__models__model_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get State",
+        "tags": [
+          "modeling"
+        ]
+      },
+      "post": {
+        "operationId": "set_state_tenants__tenant_id__projects__project_id__models__model_id__state_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set State",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/versions": {
+      "get": {
+        "operationId": "list_versions_tenants__tenant_id__projects__project_id__models__model_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VersionOut"
+                  },
+                  "title": "Response List Versions Tenants  Tenant Id  Projects  Project Id  Models  Model Id  Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Versions",
+        "tags": [
+          "modeling"
+        ]
+      },
+      "post": {
+        "operationId": "create_version_tenants__tenant_id__projects__project_id__models__model_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Version",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/records/{record_id}": {
+      "get": {
+        "operationId": "get_record_tenants__tenant_id__projects__project_id__records__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordAnyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Record",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/records/{record_id}/history": {
+      "get": {
+        "operationId": "record_history_tenants__tenant_id__projects__project_id__records__record_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryOut"
+                  },
+                  "title": "Response Record History Tenants  Tenant Id  Projects  Project Id  Records  Record Id  History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record History",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/records/{record_id}/impact": {
+      "get": {
+        "operationId": "record_impact_tenants__tenant_id__projects__project_id__records__record_id__impact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 4,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImpactOut"
+                  },
+                  "title": "Response Record Impact Tenants  Tenant Id  Projects  Project Id  Records  Record Id  Impact Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Impact",
+        "tags": [
+          "modeling"
+        ]
+      }
+    }
+  }
+}
