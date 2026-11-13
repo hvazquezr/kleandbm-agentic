@@ -1,8 +1,12 @@
-import { ArrowLeft, Eye, LayoutGrid, Plus } from "lucide-react";
+import { ArrowLeft, Eye, LayoutGrid, Plus, Sparkles } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "wouter";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
+import { ElementTrace } from "@/components/design/ElementTrace";
+import { ReviewPanel } from "@/components/design/ReviewPanel";
+import type { AgentName } from "@/api/hooks";
+import { buildTrace } from "@/lib/trace";
 import { SourcesManager } from "@/components/sources/SourcesManager";
 import type { Schemas } from "@/api/client";
 import { useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
@@ -43,6 +47,8 @@ export default function ModelEditor() {
   const [connecting, setConnecting] = useState<{ from: string; to: string } | null>(null);
   const [addingTable, setAddingTable] = useState(false);
   const [localLayout, setLocalLayout] = useState<Positions>({});
+  const [agent, setAgent] = useState<AgentName>("business_requirements");
+  const [focusCandidate, setFocusCandidate] = useState<string | undefined>(undefined);
 
   const role = project.data?.role;
   const canEdit = role !== undefined && role !== "viewer";
@@ -72,6 +78,23 @@ export default function ModelEditor() {
   const onSelectRelationship = useCallback((id: string) => {
     setSelection({ kind: "relationship", id });
     setTab("inspect");
+  }, []);
+  const trace = useMemo(() => (snap ? buildTrace(snap) : null), [snap]);
+  // Any record reference (chips in chat, registers, review): model elements open in the
+  // inspector and on the canvas, register entries show their history and impact.
+  const selectRecord = useCallback((id: string) => {
+    if (tables.has(id)) return onSelectTable(id);
+    if (snap?.relationships.some((r) => r.id === id)) return onSelectRelationship(id);
+    const attr = attributes.get(id);
+    if (attr) return onSelectTable(attr.data.table_id);
+    setSelection({ kind: "record", id });
+    setTab("inspect");
+  }, [tables, attributes, snap, onSelectTable, onSelectRelationship]);
+  const onCandidate = useCallback((id: string) => {
+    setFocusCandidate(id);
+    toast.info("The Architect's design and the Validator's review are on the Review tab.", {
+      action: { label: "Open", onClick: () => setTab("review") },
+    });
   }, []);
 
   if (snapshot.error) {
@@ -109,6 +132,11 @@ export default function ModelEditor() {
         {!canEdit && role && <Badge variant="outline">read-only ({role})</Badge>}
         <div className="ml-auto flex gap-2">
           {!readOnly && (
+            <Button size="sm" variant="outline" onClick={() => { setAgent("architect"); setTab("assistant"); }}>
+              <Sparkles className="size-4" /> Architect
+            </Button>
+          )}
+          {!readOnly && (
             <Button size="sm" variant="outline" onClick={() => setAddingTable(true)}>
               <Plus className="size-4" /> Table
             </Button>
@@ -145,26 +173,43 @@ export default function ModelEditor() {
           )}
         </div>
 
-        <aside className="w-[440px] border-l flex flex-col min-h-0">
+        <aside className="w-[440px] shrink-0 border-l flex flex-col min-h-0 overflow-hidden">
           <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0 gap-0">
-            <TabsList className="m-2">
+            {/* Six tabs in a 440px panel: compact triggers so they all fit. */}
+            <TabsList className="m-2 w-[calc(100%-1rem)] [&>button]:px-1.5 [&>button]:text-xs">
               <TabsTrigger value="assistant">Assistant</TabsTrigger>
               <TabsTrigger value="inspect">Inspector</TabsTrigger>
               <TabsTrigger value="registers">Registers</TabsTrigger>
+              <TabsTrigger value="review">Review</TabsTrigger>
               <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="versions">Versions</TabsTrigger>
             </TabsList>
             {/* The assistant scrolls its own transcript and keeps its composer pinned. */}
-            <TabsContent value="assistant" className="flex-1 min-h-0 flex flex-col px-4 pb-4">
-              <AssistantPanel
-                path={path}
-                modelId={modelId}
-                canEdit={canEdit}
-                className="flex-1"
-                onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }}
-              />
+            <TabsContent value="assistant" className="flex-1 min-h-0 flex flex-col px-4 pb-4 gap-2">
+              <div className="flex rounded-md border p-0.5 text-xs w-fit" role="tablist" aria-label="Agent">
+                {([["business_requirements", "Requirements"], ["architect", "Architect"]] as const).map(([value, label]) => (
+                  <button key={value} type="button" role="tab" aria-selected={agent === value}
+                    className={`px-2.5 py-1 rounded ${agent === value ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setAgent(value)}>{label}</button>
+                ))}
+              </div>
+              {/* Both stay mounted so a running agent keeps streaming while you switch. */}
+              {(["business_requirements", "architect"] as const).map((a) => (
+                <AssistantPanel
+                  key={a}
+                  agent={a}
+                  path={path}
+                  modelId={modelId}
+                  canEdit={canEdit && viewingSeq === undefined}
+                  className={agent === a ? "flex-1" : "hidden"}
+                  onSelectRecord={selectRecord}
+                  onCandidate={onCandidate}
+                />
+              ))}
             </TabsContent>
-            <ScrollArea className={tab === "assistant" ? "hidden" : "flex-1 min-h-0"}>
+            {/* Radix wraps scroll content in a display:table div that grows to the widest child;
+                make it a block so panel content wraps to the panel's width. */}
+            <ScrollArea className={tab === "assistant" ? "hidden" : "flex-1 min-h-0 [&_[data-slot=scroll-area-viewport]>div]:!block"}>
               <div className="p-4">
                 <TabsContent value="inspect" className="space-y-6">
                   {!selection && <p className="text-sm text-muted-foreground">Select a table or relationship. Drag from a table's bottom handle to another table to relate them.</p>}
@@ -177,6 +222,8 @@ export default function ModelEditor() {
                         write={write}
                         onDeleted={() => setSelection(null)}
                       />
+                      {trace && <ElementTrace trace={trace} onSelect={selectRecord}
+                        ids={[selectedTable.id, ...snap.attributes.filter((a) => a.data.table_id === selectedTable.id).map((a) => a.id)]} />}
                       <RecordActivity path={path} recordId={selectedTable.id} describe={describe} />
                     </>
                   )}
@@ -190,6 +237,7 @@ export default function ModelEditor() {
                         write={write}
                         onDeleted={() => setSelection(null)}
                       />
+                      {trace && <ElementTrace trace={trace} ids={[selectedRel.id]} onSelect={selectRecord} />}
                       <RecordActivity path={path} recordId={selectedRel.id} describe={describe} />
                     </>
                   )}
@@ -197,7 +245,11 @@ export default function ModelEditor() {
                 </TabsContent>
                 <TabsContent value="registers">
                   <RegistersPanel snapshot={snap} canApprove={canApprove && viewingSeq === undefined} write={write}
-                    onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }} />
+                    onSelectRecord={selectRecord} />
+                </TabsContent>
+                <TabsContent value="review">
+                  <ReviewPanel path={path} modelId={modelId} snapshot={snap} canEdit={canEdit && viewingSeq === undefined}
+                    focusCandidateId={focusCandidate} onSelectRecord={selectRecord} />
                 </TabsContent>
                 <TabsContent value="sources">
                   <SourcesManager path={path} role={role} modelId={modelId} />

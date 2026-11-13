@@ -72,9 +72,13 @@ function SourceRow({ path, source, isOwner, canEdit, modelId }: {
       {confirmDialog}
       <div className="flex items-center gap-2 text-sm">
         <Database className="size-4 text-muted-foreground shrink-0" />
-        <span className="font-medium">{source.name}</span>
-        <span className="text-xs text-muted-foreground truncate">{source.username}@{source.host}:{source.port}/{source.database}</span>
-        <span className="ml-auto flex items-center gap-1.5">
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium truncate">{source.name}</span>
+          <span className="block text-xs text-muted-foreground truncate" title={`${source.username}@${source.host}:${source.port}/${source.database}`}>
+            {source.username}@{source.host}:{source.port}/{source.database}
+          </span>
+        </span>
+        <span className="shrink-0 flex items-center gap-1.5">
           {modelId && !disabled && <LinkToggle path={path} modelId={modelId} sourceId={source.id} canEdit={canEdit} />}
           {disabled ? <Badge variant="outline">disabled</Badge>
             : check?.read_only ? <Badge variant="outline" className="gap-1 text-green-400"><CheckCircle2 className="size-3" /> read-only</Badge>

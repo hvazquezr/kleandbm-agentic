@@ -13,6 +13,16 @@ export type AgentEvent =
       name: string;
       summary?: string;
       record?: { id: string; code: string; type: string } | null;
+      /** Set when a subgraph the Architect called (a consultation or a review) made the call. */
+      agent?: "business_requirements" | "validator";
+    }
+  | { type: "candidate"; candidate_id: string; status: string }
+  | {
+      type: "review";
+      status: "started" | "completed" | "incomplete" | "failed";
+      round: number;
+      counts?: { passed: number; failed: number; unverified: number };
+      run_id?: string;
     }
   | {
       type: "done";
@@ -20,6 +30,7 @@ export type AgentEvent =
       detail: string | null;
       message_id: string | null;
       run: { id: string; iterations?: number; tool_calls?: number; input_tokens?: number; output_tokens?: number };
+      candidate?: { id: string; status: string; applied_seq: number | null; ready_for_review: boolean; blockers: number };
     };
 
 export async function sendAgentMessage(

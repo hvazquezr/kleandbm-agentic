@@ -1,13 +1,17 @@
 import { Check, X } from "lucide-react";
+import { useMemo } from "react";
 import type { Operation, Snapshot } from "@/api/client";
+import { CheckLine, RefChip } from "@/components/design/ElementTrace";
+import { buildTrace } from "@/lib/trace";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { humanize } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 /**
- * Read-only views of the companion registers (P1). In P3/P4 the agents write these; editing
- * and confirmation flows come with them.
+ * The companion registers, with traceability: what each requirement maps to in the model and
+ * which validation checks cover it, and what each check covers. People with approval rights
+ * confirm or reject meanings here; agents never can.
  */
 
 const TONE: Record<string, string> = {
@@ -53,10 +57,13 @@ function Item({
 }) {
   return (
     <li className="rounded-md border hover:bg-accent/30">
-      <button type="button" onClick={onClick} className="w-full text-left p-2.5 pb-1.5 text-sm space-y-1.5">
+      {/* A div, not a button: items contain their own buttons (trace chips). */}
+      <div role="button" tabIndex={0} onClick={onClick}
+        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick?.(); } }}
+        className="w-full text-left p-2.5 pb-1.5 text-sm space-y-1.5 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md">
         <div className="text-xs font-mono text-muted-foreground">{code}</div>
         {children}
-      </button>
+      </div>
       {actions && <div className="flex gap-1.5 px-2.5 pb-2">{actions}</div>}
     </li>
   );
@@ -88,6 +95,7 @@ export function RegistersPanel({
   canApprove?: boolean;
   write?: Write;
 }) {
+  const trace = useMemo(() => buildTrace(snapshot), [snapshot]);
   const decide = (r: { id: string; seq: number; code: string | null; data: { confirmation_status?: string } }) =>
     canApprove && write && (r.data.confirmation_status ?? "unconfirmed") === "unconfirmed"
       ? <Decide id={r.id} seq={r.seq} code={r.code} write={write} />
@@ -106,6 +114,10 @@ export function RegistersPanel({
             <div className="text-xs text-muted-foreground">
               Origin: {humanize(r.data.origin_kind)}{r.data.origin_ref ? ` — ${r.data.origin_ref}` : ""}
             </div>
+            {r.data.feasibility_notes && <div className="text-xs text-muted-foreground">Feasibility: {r.data.feasibility_notes}</div>}
+            <Traced label="Mapped to" ids={trace.mappedTo(r.id)} trace={trace} onSelect={onSelectRecord}
+              empty={r.data.feasibility_status === "unsupported" ? undefined : "Not mapped to the model yet"} />
+            {trace.checksFor([r.id]).map((c) => <CheckLine key={c.id} check={c} onSelect={onSelectRecord} />)}
           </Item>
         ))}
       </Section>
@@ -158,10 +170,28 @@ export function RegistersPanel({
             <div className="flex flex-wrap gap-1.5">
               <Status value={c.data.status} />
               <Badge variant="outline" className="font-normal">{humanize(c.data.check_type)}</Badge>
+              {c.data.is_blocking && c.data.status !== "passed" && <Badge variant="destructive">blocking</Badge>}
+              {c.data.issue_key && <span className="font-mono text-[11px] text-muted-foreground self-center">{c.data.issue_key}</span>}
             </div>
+            {c.data.recommended_action && c.data.status !== "passed" && (
+              <div className="text-xs text-muted-foreground">Recommended: {c.data.recommended_action}</div>
+            )}
+            <Traced label="Covers" ids={trace.checked(c.id)} trace={trace} onSelect={onSelectRecord} />
           </Item>
         ))}
       </Section>
+    </div>
+  );
+}
+
+function Traced({ label, ids, trace, onSelect, empty }: {
+  label: string; ids: string[]; trace: ReturnType<typeof buildTrace>; onSelect: (id: string) => void; empty?: string;
+}) {
+  if (ids.length === 0) return empty ? <div className="text-xs text-amber-500">{empty}</div> : null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      {ids.map((id) => <RefChip key={id} id={id} trace={trace} onSelect={onSelect} />)}
     </div>
   );
 }

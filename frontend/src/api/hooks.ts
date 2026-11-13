@@ -203,10 +203,12 @@ export function useConversations(path: ProjectPath, modelId: string | undefined)
   });
 }
 
+export type AgentName = "business_requirements" | "architect";
+
 export function useCreateConversation(path: ProjectPath) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { model_id?: string; title?: string }) =>
+    mutationFn: (body: { model_id?: string; title?: string; agent?: AgentName }) =>
       unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/conversations", { params: { path }, body: { agent: "business_requirements", ...body } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", path.project_id] }),
   });
@@ -267,7 +269,7 @@ export function useInvalidateAfterAgent(path: ProjectPath) {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ["snapshot", "messages", "documents", "history", "impact", "versions"].map((k) =>
+      ["snapshot", "messages", "documents", "history", "impact", "versions", "candidates", "candidate"].map((k) =>
         qc.invalidateQueries({ queryKey: [k, path.project_id] }),
       ),
     );
@@ -314,5 +316,45 @@ export function useLinkModelSource(path: ProjectPath, modelId: string) {
         : unwrap(api.DELETE("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources/{connection_id}", {
             params: { path: { ...path, model_id: modelId, connection_id: args.connectionId } } })),
     onSettled: () => qc.invalidateQueries({ queryKey: ["model-sources", path.project_id, modelId] }),
+  });
+}
+
+// --- Design candidates (the Architect's proposals and the Validator's review) -------------
+
+export function useCandidates(path: ProjectPath, modelId: string) {
+  return useQuery({
+    queryKey: ["candidates", path.project_id, modelId],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/candidates", {
+      params: { path: { ...path, model_id: modelId } },
+    })),
+  });
+}
+
+export function useCandidate(path: ProjectPath, candidateId: string | undefined) {
+  return useQuery({
+    queryKey: ["candidate", path.project_id, candidateId ?? ""],
+    enabled: !!candidateId,
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}", {
+      params: { path: { ...path, candidate_id: candidateId! } },
+    })),
+  });
+}
+
+/** Apply (one changeset; refused with 409 if the model changed since) or discard a proposal. */
+export function useCandidateAction(path: ProjectPath, action: "apply" | "discard") {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateProjectData(path);
+  return useMutation({
+    mutationFn: (candidateId: string) =>
+      action === "apply"
+        ? unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/apply", {
+            params: { path: { ...path, candidate_id: candidateId } } }))
+        : unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/discard", {
+            params: { path: { ...path, candidate_id: candidateId } } })),
+    onSettled: () => Promise.all([
+      invalidate(),
+      qc.invalidateQueries({ queryKey: ["candidates", path.project_id] }),
+      qc.invalidateQueries({ queryKey: ["candidate", path.project_id] }),
+    ]),
   });
 }
