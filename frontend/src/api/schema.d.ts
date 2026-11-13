@@ -163,6 +163,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/decision-points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Decision Points
+         * @description The candidate's decision-point searches: every node considered, its scores and why it
+         *     was kept, pruned, rejected or selected.
+         */
+        get: operations["list_decision_points_tenants__tenant_id__projects__project_id__candidates__candidate_id__decision_points_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/discard": {
         parameters: {
             query?: never;
@@ -1043,6 +1064,43 @@ export interface components {
          * @enum {string}
          */
         DecisionKind: "decision" | "assumption";
+        /** DecisionPointOut */
+        DecisionPointOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decision Id */
+            decision_id: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nodes */
+            nodes: components["schemas"]["SearchNodeOut"][];
+            /** Question */
+            question: string;
+            /** Scope */
+            scope: {
+                [key: string]: unknown;
+            };
+            /** Selected Node Id */
+            selected_node_id: string | null;
+            /** Status */
+            status: string;
+            /** Stop Reason */
+            stop_reason: string | null;
+            /** Trigger */
+            trigger: string;
+            /** Usage */
+            usage: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * DecisionStatus
          * @enum {string}
@@ -1746,6 +1804,38 @@ export interface components {
             /** Query */
             query: string;
         };
+        /** SearchNodeOut */
+        SearchNodeOut: {
+            /** Assumptions */
+            assumptions: string[];
+            /** Choice */
+            choice: string;
+            /** Depth */
+            depth: number;
+            /** Evaluation */
+            evaluation: {
+                [key: string]: unknown;
+            };
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Rationale */
+            rationale: string | null;
+            /** Reason */
+            reason: string | null;
+            /** Stage */
+            stage: string | null;
+            /** Status */
+            status: string;
+            /** Tables */
+            tables: string[];
+        };
         /** SnapshotOut */
         SnapshotOut: {
             /** As Of Seq */
@@ -2316,6 +2406,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_decision_points_tenants__tenant_id__projects__project_id__candidates__candidate_id__decision_points_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionPointOut"][];
                 };
             };
             /** @description Validation Error */

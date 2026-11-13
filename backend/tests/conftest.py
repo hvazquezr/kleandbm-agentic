@@ -28,7 +28,7 @@ from app.api.auth import TokenVerifier
 from app.config import get_settings
 from app.main import create_app
 from app.persistence.db import get_session
-from app.persistence import conversations as _conversation_tables, design as _design_tables, documents as _document_tables, modeling as _modeling_tables, sources as _source_tables  # noqa: F401  (registers tables)
+from app.persistence import conversations as _conversation_tables, design as _design_tables, documents as _document_tables, modeling as _modeling_tables, search as _search_tables, sources as _source_tables  # noqa: F401  (registers tables)
 from app.persistence.models import Base
 
 ISSUER = "https://test-issuer.example/"

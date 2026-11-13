@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     validator_max_iterations: int = 16  # model calls per review round
     validator_max_rounds: int = 3  # correction rounds per review episode (Architect run)
     validator_max_attempts_per_issue: int = 3  # carried across episodes
+    # Selective Tree of Thought (spec §7): bounded, local beam search at recorded technical
+    # decision points. Disable it for the single-candidate baseline.
+    architect_tot_enabled: bool = True
+    architect_max_decision_points: int = 2  # per Architect run
+    tot_children: int = 3  # distinct alternatives per expanded node
+    tot_beam: int = 2  # candidates kept per level
+    tot_score_threshold: float = 2.5  # weighted 0-5 score an alternative needs to stay eligible
+    tot_max_model_calls: int = 14  # generation + evaluation calls per decision point
+    tot_max_tool_calls: int = 24  # source probes during evaluation per decision point
+    tot_max_seconds: int = 900
+    tot_max_output_tokens: int = 80000
     agent_max_tokens: int = 16000
     # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
     agent_checkpoints: bool = True

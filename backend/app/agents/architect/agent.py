@@ -33,7 +33,15 @@ from app.adapters.llm import ChatModel, LLMError
 from app.adapters.sources import SourceConnector
 from app.adapters.storage import ObjectStore
 from app.agents.architect.prompt import SYSTEM_PROMPT
-from app.agents.architect.tools import HANDLERS, OWN_TRANSACTION_TOOLS, TOOL_SPECS, WRITE_TOOLS, ArchitectContext
+from app.agents.architect import search
+from app.agents.architect.tools import (
+    BASELINE_TOOL_SPECS,
+    HANDLERS,
+    OWN_TRANSACTION_TOOLS,
+    TOOL_SPECS,
+    WRITE_TOOLS,
+    ArchitectContext,
+)
 from app.agents.requirements.agent import _history
 from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, stop_outcome
 from app.agents.validator.agent import review as validator_review
@@ -91,10 +99,13 @@ def run_design(
     validator_max_iterations: int = 16,
     max_rounds: int = 3,
     max_attempts: int = 3,
+    tot: search.Settings | None = None,
+    max_decision_points: int = 2,
 ) -> None:
     """Execute one Architect run. `requirements_model` drives the Business Requirements
     subgraph behind ask_requirements; `validator_model` drives the Validator review. Without a
-    Validator the design is applied or proposed unreviewed and stays Draft. Never raises:
+    Validator the design is applied or proposed unreviewed and stays Draft. `tot` enables the
+    bounded search at decision points (None: the single-candidate baseline). Never raises:
     outcomes are recorded on the run, the candidate and the assistant message."""
     with session_factory() as session:
         run = session.get(AgentRun, run_id)
@@ -127,6 +138,8 @@ def run_design(
             source_ids=[c.id for c in sources.model_sources(session, scope, model.id) if not c.disabled_at],
             run=run, requirements_model=requirements_model, emit=emit, max_consultations=max_consultations,
             consultation_max_iterations=consultation_max_iterations,
+            chat_model=chat_model, tot_enabled=tot is not None, tot_settings=tot,
+            max_decision_points=max_decision_points,
         )
         emit({"type": "candidate", "candidate_id": str(candidate.id), "status": str(candidate.status)})
 
@@ -138,7 +151,8 @@ def run_design(
         })
 
         loop = Loop(session=session, run=run, chat_model=chat_model, system_prompt=SYSTEM_PROMPT,
-                    tools=TOOL_SPECS, handlers=HANDLERS, write_tools=WRITE_TOOLS, ctx=ctx, emit=emit,
+                    tools=TOOL_SPECS if tot is not None else BASELINE_TOOL_SPECS, handlers=HANDLERS,
+                    write_tools=WRITE_TOOLS, ctx=ctx, emit=emit,
                     max_iterations=max_iterations, own_transaction=OWN_TRANSACTION_TOOLS)
         outcome: dict[str, Any] = {}
         episode: dict[str, Any] = {"corrections": 0, "skipped": None}
@@ -249,7 +263,7 @@ def run_design(
                 traceback.print_exc()
                 detail = f"the agent failed unexpectedly ({type(exc).__name__})"
             candidate.status = CandidateStatus.FAILED
-            record_usage(run, loop.usage, ctx.changeset_seqs)
+            record_usage(run, _total_usage(loop, ctx), ctx.changeset_seqs)
             finish_run(session, run, conversation, RunStatus.FAILED, detail, emit, loop.activity,
                        extra={"candidate": _candidate_event(candidate)})
             return
@@ -258,7 +272,7 @@ def run_design(
 
         if outcome.get("applied_seq"):
             ctx.changeset_seqs.append(outcome["applied_seq"])
-        record_usage(run, loop.usage, ctx.changeset_seqs)
+        record_usage(run, _total_usage(loop, ctx), ctx.changeset_seqs)
         text = last_text(final["transcript"])
         note = outcome.get("note")
         stop = final.get("stop")
@@ -276,6 +290,16 @@ def _issue_prefix(issue_key: str) -> str:
     # Escalated questions start with their issue key, so a reworded finding on the same issue
     # is recognised as already escalated.
     return f"Validation finding {issue_key}:"
+
+
+def _total_usage(loop: Loop, ctx: ArchitectContext):
+    """The run's own model calls plus those inside its decision-point searches."""
+    from app.adapters.llm import Usage
+
+    total = Usage()
+    total.add(loop.usage)
+    total.add(ctx.extra_usage)
+    return total
 
 
 def _escalate(session: Session, scope, ctx: ArchitectContext, candidate: DesignCandidate) -> dict[str, list[str]]:

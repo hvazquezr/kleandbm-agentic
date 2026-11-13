@@ -1005,6 +1005,112 @@
         "title": "DecisionKind",
         "type": "string"
       },
+      "DecisionPointOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SearchNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "selected_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Node Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "usage": {
+            "additionalProperties": true,
+            "title": "Usage",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "question",
+          "scope",
+          "status",
+          "stop_reason",
+          "selected_node_id",
+          "decision_id",
+          "usage",
+          "created_at",
+          "finished_at",
+          "nodes"
+        ],
+        "title": "DecisionPointOut",
+        "type": "object"
+      },
       "DecisionStatus": {
         "enum": [
           "proposed",
@@ -2923,6 +3029,114 @@
         "title": "SearchIn",
         "type": "object"
       },
+      "SearchNodeOut": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "choice": {
+            "title": "Choice",
+            "type": "string"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "evaluation": {
+            "additionalProperties": true,
+            "title": "Evaluation",
+            "type": "object"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "depth",
+          "stage",
+          "choice",
+          "rationale",
+          "evidence_ids",
+          "assumptions",
+          "status",
+          "reason",
+          "evaluation",
+          "tables"
+        ],
+        "title": "SearchNodeOut",
+        "type": "object"
+      },
       "SnapshotOut": {
         "properties": {
           "as_of_seq": {
@@ -4136,6 +4350,79 @@
           }
         ],
         "summary": "Apply Candidate",
+        "tags": [
+          "design"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/decision-points": {
+      "get": {
+        "description": "The candidate's decision-point searches: every node considered, its scores and why it\nwas kept, pruned, rejected or selected.",
+        "operationId": "list_decision_points_tenants__tenant_id__projects__project_id__candidates__candidate_id__decision_points_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DecisionPointOut"
+                  },
+                  "title": "Response List Decision Points Tenants  Tenant Id  Projects  Project Id  Candidates  Candidate Id  Decision Points Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Decision Points",
         "tags": [
           "design"
         ]

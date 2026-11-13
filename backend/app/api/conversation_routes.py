@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.adapters.llm import LLMError
+from app.agents.architect import search
 from app.agents.architect.agent import run_design
 from app.agents.requirements.agent import run_turn
 from app.api.source_routes import get_box
@@ -184,6 +185,12 @@ def send_message(
                     validator_model=validator_model, validator_unavailable=validator_unavailable,
                     validator_max_iterations=settings.validator_max_iterations,
                     max_rounds=settings.validator_max_rounds, max_attempts=settings.validator_max_attempts_per_issue,
+                    tot=search.Settings(
+                        children=settings.tot_children, beam=settings.tot_beam, threshold=settings.tot_score_threshold,
+                        max_model_calls=settings.tot_max_model_calls, max_tool_calls=settings.tot_max_tool_calls,
+                        max_seconds=settings.tot_max_seconds, max_output_tokens=settings.tot_max_output_tokens,
+                    ) if settings.architect_tot_enabled else None,
+                    max_decision_points=settings.architect_max_decision_points,
                 )
             else:
                 run_turn(

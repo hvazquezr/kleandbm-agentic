@@ -80,6 +80,17 @@ def test_consultation_tool_definitions_are_accepted(model):
     assert turn.stop_reason in {"tool_use", "end_turn"}
 
 
+def test_search_tool_definitions_are_accepted(model):
+    """The decision-point generator's strict, nested schema and the evaluator's tools."""
+    from app.agents.architect.search import EVAL_TOOLS, EVALUATOR_PROMPT, GENERATOR_PROMPT, PROPOSE_SPEC
+
+    brief = "<decision_brief>\n{\"decision_point\": \"Profit with costs only by store and day\"}\n</decision_brief>"
+    turn = model.complete(GENERATOR_PROMPT, [{"role": "user", "text": brief}], [PROPOSE_SPEC])
+    assert turn.stop_reason in {"tool_use", "end_turn", "max_tokens"}
+    turn = model.complete(EVALUATOR_PROMPT, [{"role": "user", "text": "<evaluation_brief>{}</evaluation_brief>"}], EVAL_TOOLS)
+    assert turn.stop_reason in {"tool_use", "end_turn"}
+
+
 @pytest.fixture
 def validator_model():
     s = get_settings()

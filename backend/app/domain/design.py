@@ -616,6 +616,8 @@ def readiness(candidate: DesignCandidate) -> tuple[bool, list[str]]:
     failed hard internal checks, blocking findings that failed or couldn't be verified, or no
     completed review at all (an unreviewed design is unverified, never a pass)."""
     blockers = [f"{c['name']}: {c['summary']}" for c in hard_failures(candidate.internal_checks or [])]
+    blockers += [f"decision point: {s['question']} (the search ended {str(s['status']).replace('_', ' ')})"
+                 for s in candidate.content.get("searches", []) if s.get("status") != "selected"]
     findings = latest_findings(candidate)
     if findings is None:
         blockers.append("validation: the Validator hasn't reviewed this design")

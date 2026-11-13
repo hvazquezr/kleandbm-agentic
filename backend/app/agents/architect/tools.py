@@ -14,7 +14,9 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.adapters.llm import ChatModel, LLMError, ToolSpec
+from sqlalchemy import select
+
+from app.adapters.llm import ChatModel, LLMError, ToolSpec, Usage
 from app.adapters.sources import SourceConnector
 from app.agents.requirements import consult
 from app.agents.requirements import tools as rt
@@ -60,6 +62,13 @@ class ArchitectContext(ToolContext):
     # Person-edited elements a Validator finding targets: during correction they become
     # questions to the user, never automatic corrections (spec §7), so edits are refused.
     protected: set[str] = field(default_factory=set)
+    # Selective Tree of Thought (open_decision_point).
+    chat_model: ChatModel | None = None
+    tot_enabled: bool = False
+    tot_settings: Any = None  # search.Settings
+    max_decision_points: int = 2
+    decision_points: list[str] = field(default_factory=list)
+    extra_usage: Usage = field(default_factory=Usage)  # model usage inside searches, added to the run
 
     def requirements(self) -> list[modeling.RecordView]:
         seq = modeling.current_seq(self.session, self.scope)
@@ -190,6 +199,30 @@ CONSULT_SPEC = ToolSpec(
     }),
 )
 
+DECISION_POINT_SPEC = ToolSpec(
+    "open_decision_point",
+    "Record a technical decision point and compare designs for it with a bounded search, when at least two "
+    "viable alternatives exist and one trigger applies: grain_conflict (a requirement's grain differs from what "
+    "the sources support), competing_requirements (requirements need incompatible structures), "
+    "ambiguous_relationship (evidence leaves a relationship pattern or cardinality uncertain), or "
+    "multiple_remediations (a Validator failure has more than one viable fix; give its issue_key). Never for "
+    "business meaning: ask_requirements instead. The search changes only the elements you name, writes the "
+    "chosen design into your candidate and records the decision. At most a couple per run.",
+    _obj({
+        "trigger": {"type": "string", "enum": ["grain_conflict", "competing_requirements", "ambiguous_relationship",
+                                               "multiple_remediations"]},
+        "question": {"type": "string", "description": "The design question, in one sentence"},
+        "why": {"type": "string", "description": "The conflict and the evidence for it, citing evidence ids"},
+        "elements": {"type": "array", "items": {"type": "string"},
+                     "description": "Affected elements ('table' or 'table.attribute'), including tables an alternative would add"},
+        "requirement_ids": {"type": "array", "items": {"type": "string"}},
+        "stages": {"type": "array", "items": {"type": "string", "enum": ["grain", "relationships", "measures"]},
+                   "description": "Which stages the decision affects; others are skipped"},
+        "alternatives": {"type": "array", "items": _obj({"choice": {"type": "string"}, "rationale": {"type": "string"}})},
+        "issue_key": _opt("For multiple_remediations: the Validator finding's issue key."),
+    }),
+)
+
 READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents")]
 QUESTION_SPEC = next(s for s in rt.TOOL_SPECS if s.name == "raise_question")
 # Only the tools that write structured content are strict: all of them together exceed the
@@ -197,7 +230,10 @@ QUESTION_SPEC = next(s for s in rt.TOOL_SPECS if s.name == "raise_question")
 STRICT_TOOLS = {"put_table", "put_relationships", "map_requirement", "record_decision", "update_feasibility",
                 "raise_question"}
 TOOL_SPECS = [replace(s, strict=s.name in STRICT_TOOLS)
-              for s in READ_SPECS + SOURCE_TOOL_SPECS + CANDIDATE_TOOL_SPECS + REGISTER_TOOL_SPECS + [CONSULT_SPEC, QUESTION_SPEC]]
+              for s in READ_SPECS + SOURCE_TOOL_SPECS + CANDIDATE_TOOL_SPECS + REGISTER_TOOL_SPECS
+              + [CONSULT_SPEC, DECISION_POINT_SPEC, QUESTION_SPEC]]
+# Without ToT (the single-candidate baseline) the Architect doesn't get open_decision_point.
+BASELINE_TOOL_SPECS = [s for s in TOOL_SPECS if s.name != "open_decision_point"]
 
 
 # --- Source tools ---------------------------------------------------------------------------
@@ -302,10 +338,9 @@ def _table_labels(ctx: ArchitectContext, name: str) -> list[str]:
     return [key] + [p for p in ctx.protected if p.startswith(f"{key}.")]
 
 
-def put_table(ctx: ArchitectContext, args: dict) -> dict:
-    _guard(ctx, _table_labels(ctx, args["name"]) + (_table_labels(ctx, args["previous_name"])
-                                                    if _none_if_empty(args.get("previous_name")) else []))
-    table = {
+def table_payload(args: dict) -> dict:
+    """A put_table input as the workspace stores it ("" means none; additivity "none" is null)."""
+    return {
         "name": args["name"], "previous_name": _none_if_empty(args.get("previous_name")), "kind": args["kind"],
         "grain": _none_if_empty(args.get("grain")), "description": _none_if_empty(args.get("description")),
         "scd_type": args.get("scd_type") or "none", "source_ref": _none_if_empty(args.get("source_ref")),
@@ -313,6 +348,17 @@ def put_table(ctx: ArchitectContext, args: dict) -> dict:
                         "description": _none_if_empty(a.get("description")),
                         "source_ref": _none_if_empty(a.get("source_ref"))} for a in args.get("attributes") or []],
     }
+
+
+def relationship_payloads(items: list[dict]) -> list[dict]:
+    return [{**r, "role_name": _none_if_empty(r.get("role_name")), "description": _none_if_empty(r.get("description"))}
+            for r in items or []]
+
+
+def put_table(ctx: ArchitectContext, args: dict) -> dict:
+    _guard(ctx, _table_labels(ctx, args["name"]) + (_table_labels(ctx, args["previous_name"])
+                                                    if _none_if_empty(args.get("previous_name")) else []))
+    table = table_payload(args)
     try:
         entry = design.put_table(ctx.candidate, table, ctx.requirements())
     except (InvalidOperation, ValueError) as exc:
@@ -322,8 +368,7 @@ def put_table(ctx: ArchitectContext, args: dict) -> dict:
 
 
 def put_relationships(ctx: ArchitectContext, args: dict) -> dict:
-    rels = [{**r, "role_name": _none_if_empty(r.get("role_name")), "description": _none_if_empty(r.get("description"))}
-            for r in args.get("relationships") or []]
+    rels = relationship_payloads(args.get("relationships") or [])
     _guard(ctx, [design._rel_label(r) for r in rels])
     try:
         labels = design.put_relationships(ctx.candidate, rels, ctx.requirements())
@@ -437,6 +482,77 @@ def ask_requirements(ctx: ArchitectContext, args: dict) -> dict:
     }
 
 
+def open_decision_point(ctx: ArchitectContext, args: dict) -> dict:
+    from app.agents.architect import search  # the search imports these tools
+
+    if not ctx.tot_enabled or ctx.chat_model is None:
+        raise ToolInputError("decision-point search isn't enabled in this run; decide and record_decision")
+    if len(ctx.decision_points) >= ctx.max_decision_points:
+        raise ToolInputError(f"you've used all {ctx.max_decision_points} decision points for this run; decide "
+                             "directly and record_decision")
+    try:
+        trigger = search.Trigger(args.get("trigger"))
+    except ValueError:
+        raise ToolInputError("trigger must be grain_conflict, competing_requirements, ambiguous_relationship or "
+                             "multiple_remediations; business meaning goes to ask_requirements") from None
+    question = str(args.get("question") or "").strip()
+    alternatives = [{"choice": str(a.get("choice") or "").strip(), "rationale": str(a.get("rationale") or "").strip()}
+                    for a in args.get("alternatives") or [] if str(a.get("choice") or "").strip()]
+    if not question or len(alternatives) < 2:
+        raise ToolInputError("a decision point needs a question and at least two viable alternatives")
+    stages = [s for s in search.STAGES if s in (args.get("stages") or [])]
+    if not stages:
+        raise ToolInputError("name the stages the decision affects: grain, relationships, measures")
+    elements = [str(e).strip() for e in args.get("elements") or [] if str(e).strip()]
+    if not elements:
+        raise ToolInputError("name the affected elements, so the search stays local")
+    known = {str(r.id) for r in ctx.requirements()}
+    requirement_ids = [str(r) for r in args.get("requirement_ids") or [] if str(r).strip()]
+    if bad := [r for r in requirement_ids if r not in known]:
+        raise ToolInputError(f"no such requirement: {', '.join(bad)}; use ids from get_registers")
+    issue_key = _none_if_empty(args.get("issue_key"))
+    if trigger is search.Trigger.MULTIPLE_REMEDIATIONS:
+        findings = design.latest_findings(ctx.candidate) or []
+        if not any(f["issue_key"] == issue_key and f["status"] == "failed" for f in findings):
+            raise ToolInputError("multiple_remediations needs the issue_key of a failed Validator finding")
+    ctx.session.commit()  # the search commits its nodes as it goes
+    dp = search.run_search(ctx, chat_model=ctx.chat_model, trigger=trigger, question=question,
+                           why=str(args.get("why") or "").strip(), elements=elements,
+                           requirement_ids=requirement_ids, stages=stages, alternatives=alternatives,
+                           issue_key=issue_key, settings=ctx.tot_settings or search.Settings(),
+                           emit=ctx.emit or (lambda _: None))
+    ctx.decision_points.append(str(dp.id))
+    nodes = ctx.session.scalars(select(search.SearchNode).where(search.SearchNode.decision_point_id == dp.id)).all()
+    by_status: dict[str, int] = {}
+    for n in nodes:
+        if n.depth:
+            by_status[str(n.status)] = by_status.get(str(n.status), 0) + 1
+    selected = next((n for n in nodes if n.id == dp.selected_node_id), None)
+    chain = []
+    while selected is not None and selected.depth:
+        chain.append({"stage": selected.stage, "choice": selected.choice})
+        selected = next((n for n in nodes if n.id == selected.parent_id), None)
+    decision = modeling.get_record(ctx.session, ctx.scope, dp.decision_id) if dp.decision_id else None
+    if decision is not None:
+        ctx.changed.append({"id": str(decision.id), "code": decision.code or "", "type": "decision"})
+    notes = {
+        "selected": "Your candidate now holds the chosen design for these elements. Continue from it.",
+        "partial": "Only a partial design qualified; it's in your candidate, and the model will stay Draft "
+                   "until its hard checks pass. Fix what you can, or explain the limitation.",
+        "no_candidate": "Every alternative was rejected; your candidate is unchanged. Decide directly or "
+                        "explain the limitation.",
+        "failed": "The search failed; your candidate is unchanged. Decide directly.",
+    }
+    return {
+        "decision_point_id": str(dp.id), "status": str(dp.status), "stop_reason": dp.stop_reason,
+        "chosen": list(reversed(chain)), "candidates": by_status, "decision": decision.code if decision else None,
+        "usage": dp.usage, "note": notes.get(str(dp.status), ""), "failed_checks": _checks_note(ctx),
+        "summary": f"Decision point ({str(trigger).replace('_', ' ')}): {str(dp.status).replace('_', ' ')}"
+                   + (f", recorded {decision.code}" if decision else ""),
+        **({"code": decision.code, "id": str(decision.id), "type": "decision"} if decision else {}),
+    }
+
+
 HANDLERS = {
     "get_registers": rt.get_registers,
     "list_documents": rt.list_documents,
@@ -451,10 +567,11 @@ HANDLERS = {
     "record_decision": record_decision,
     "update_feasibility": update_feasibility,
     "ask_requirements": ask_requirements,
+    "open_decision_point": open_decision_point,
     "raise_question": rt.raise_question,
 }
 # Runs the Business Requirements subgraph, which commits its own register changes.
-OWN_TRANSACTION_TOOLS = {"ask_requirements"}
+OWN_TRANSACTION_TOOLS = {"ask_requirements", "open_decision_point"}
 # Committed as soon as they succeed: register changes, candidate edits and evidence.
 WRITE_TOOLS = (set(SOURCE_HANDLERS) - {"list_sources"}) | {
     "put_table", "put_relationships", "remove_element", "map_requirement",

@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine
 
 from app.config import get_settings
-from app.persistence import conversations, design, documents, modeling, sources  # noqa: F401  (registers tables on Base.metadata)
+from app.persistence import conversations, design, documents, modeling, search, sources  # noqa: F401  (registers tables on Base.metadata)
 from app.persistence.models import Base
 
 config = context.config

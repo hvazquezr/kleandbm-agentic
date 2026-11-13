@@ -9,7 +9,10 @@ from pydantic import BaseModel
 
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.domain import design
+from sqlalchemy import select
+
 from app.persistence.design import CandidateStatus, DesignCandidate
+from app.persistence.search import DecisionPoint, SearchNode
 
 router = APIRouter(prefix="/tenants/{tenant_id}/projects/{project_id}", tags=["design"])
 
@@ -90,3 +93,67 @@ def apply_candidate(candidate_id: uuid.UUID, session: SessionDep, scope: Project
 @router.post("/candidates/{candidate_id}/discard")
 def discard_candidate(candidate_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> CandidateOut:
     return _full(session, scope, design.discard_candidate(session, scope, candidate_id))
+
+
+class SearchNodeOut(BaseModel):
+    id: uuid.UUID
+    parent_id: uuid.UUID | None
+    depth: int
+    stage: str | None
+    choice: str
+    rationale: str | None
+    evidence_ids: list[str]
+    assumptions: list[str]
+    status: str
+    reason: str | None
+    evaluation: dict[str, Any]
+    tables: list[str]  # the node's affected tables, by name (its full content stays server-side)
+
+
+class DecisionPointOut(BaseModel):
+    id: uuid.UUID
+    trigger: str
+    question: str
+    scope: dict[str, Any]
+    status: str
+    stop_reason: str | None
+    selected_node_id: uuid.UUID | None
+    decision_id: uuid.UUID | None
+    usage: dict[str, Any]
+    created_at: datetime
+    finished_at: datetime | None
+    nodes: list[SearchNodeOut]
+
+
+@router.get("/candidates/{candidate_id}/decision-points")
+def list_decision_points(candidate_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[DecisionPointOut]:
+    """The candidate's decision-point searches: every node considered, its scores and why it
+    was kept, pruned, rejected or selected."""
+    candidate = design.get_candidate(session, scope, candidate_id)
+    points = session.scalars(select(DecisionPoint).where(
+        DecisionPoint.tenant_id == scope.tenant_id, DecisionPoint.project_id == scope.project_id,
+        DecisionPoint.candidate_id == candidate.id).order_by(DecisionPoint.created_at))
+    out = []
+    for dp in points:
+        affected = {e.split(".")[0].strip().lower() for e in dp.scope.get("elements", [])}
+        nodes = list(session.scalars(select(SearchNode).where(SearchNode.decision_point_id == dp.id)
+                                     .order_by(SearchNode.depth, SearchNode.created_at)))
+        root_tables = {t["name"].strip().lower() for n in nodes if n.depth == 0 for t in n.content.get("tables", [])}
+
+        def shown(n: SearchNode) -> list[str]:
+            # The tables the decision is about: the affected ones, and any this branch added.
+            return [t["name"] for t in n.content.get("tables", [])
+                    if t["name"].strip().lower() in affected or t["name"].strip().lower() not in root_tables]
+
+        out.append(DecisionPointOut(
+            id=dp.id, trigger=str(dp.trigger), question=dp.question, scope=dp.scope, status=str(dp.status),
+            stop_reason=dp.stop_reason, selected_node_id=dp.selected_node_id, decision_id=dp.decision_id,
+            usage=dp.usage or {}, created_at=dp.created_at, finished_at=dp.finished_at,
+            nodes=[SearchNodeOut(
+                id=n.id, parent_id=n.parent_id, depth=n.depth, stage=n.stage, choice=n.choice, rationale=n.rationale,
+                evidence_ids=list(n.evidence_ids or []), assumptions=list(n.assumptions or []), status=str(n.status),
+                reason=n.reason, evaluation=n.evaluation or {},
+                tables=shown(n),
+            ) for n in nodes],
+        ))
+    return out
