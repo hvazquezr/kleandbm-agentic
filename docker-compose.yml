@@ -1,0 +1,20 @@
+# Local development services. MySQL (retail sample source) is added in P2.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: kleandbm
+      POSTGRES_PASSWORD: kleandbm
+      POSTGRES_DB: kleandbm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kleandbm"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
