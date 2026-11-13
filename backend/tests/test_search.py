@@ -307,3 +307,171 @@ def test_decision_points_are_inspectable_through_the_api(proj, as_user):
     assert by_choice["Allocate"]["status"] == "pruned" and by_choice["Allocate"]["evaluation"]["total"] == 2.0
     bob = as_user("auth0|bob")  # another tenant's user can't see it
     assert bob.get(f"{proj.base}/candidates/{cid}/decision-points").status_code == 404
+
+
+def test_alternatives_may_map_requirements_by_code_or_id(proj, db_session_factory):
+    seen = {}
+
+    def gen(t):  # the brief gives each affected requirement's id and code
+        brief = t[0]["text"]
+        seen["brief"] = brief
+        return propose(alt("By code", tables=[STORE_DAY], mappings=[
+            {"requirement_id": "REQ-002", "elements": ["fact_store_profit"], "note": ""}]),
+            alt("By id", tables=[{**STORE_DAY, "grain": "One row per store per month"}], mappings=[
+                {"requirement_id": proj.profit_req, "elements": ["fact_store_profit"], "note": ""}]))
+
+    proj.script(*BASE, {"tool_calls": [decision_point(proj)]}, gen, score(("C1", 4, "", 0), ("C2", 3, "", 0)),
+                {"text": "Done."})
+    proj.run()
+    assert proj.profit_req in seen["brief"] and "REQ-002" in seen["brief"]
+    with db_session_factory() as s:
+        nodes = {n.choice: n for n in s.scalars(select(SearchNode).where(SearchNode.depth == 1))}
+        assert nodes["By code"].status == "selected" and nodes["By id"].status == "kept"
+        assert nodes["By code"].content["mappings"][-1]["requirement_id"] == proj.profit_req
+
+
+def test_leaving_the_design_unchanged_is_an_alternative_too(proj, db_session_factory):
+    proj.script(
+        *BASE,
+        {"tool_calls": [decision_point(proj, elements=("fact_store_profit",))]},
+        propose(alt("No cost structure."), alt("Store-day.", tables=[STORE_DAY])),
+        score(("C1", 4, "", 0), ("C2", 3, "", 0)),
+        {"text": "Done."},
+    )
+    proj.run()
+    with db_session_factory() as s:
+        nodes = {n.choice: n for n in s.scalars(select(SearchNode).where(SearchNode.depth == 1))}
+        assert nodes["No cost structure."].status == "selected"
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert "fact_store_profit" not in {t["data"]["name"] for t in snap["tables"]}
+    assert snap["decisions"][0]["data"]["statement"].endswith("Chosen: No cost structure.")
+
+
+# --- A search that ended without a selection is decided by a person -------------------------
+
+def _no_candidate_steps(p, final_text="Profit by order is unsupported."):
+    return [
+        *BASE,
+        {"tool_calls": [decision_point(p)]},
+        propose(alt("Allocate by revenue", tables=[ORDER_ALLOC]), alt("Allocate by orders", tables=[
+            {**ORDER_ALLOC, "grain": "One row per order line"}])),
+        score(("C1", 3, "No agreed allocation", 0), ("C2", 3, "No agreed allocation", 0)),
+        {"text": final_text},
+    ]
+
+
+def _pass_round():
+    from tests.test_validator import pass_round
+    return pass_round()
+
+
+def _point(p, candidate_id):
+    points = p.alice.get(f"{p.base}/candidates/{candidate_id}/decision-points").json()
+    assert len(points) == 1
+    return points[0]
+
+
+def test_an_unselected_search_asks_a_person_and_their_acceptance_is_logged(proj, db_session_factory):
+    from app.domain import design, tenancy
+    from app.domain.access import AccessDenied, Actor, ActorKind
+    from app.persistence.modeling import Changeset
+    from app.persistence.models import User
+    import pytest
+
+    proj.script_agents(_no_candidate_steps(proj), [], _pass_round())
+    done = proj.run()[-1]
+    assert done["status"] == "completed", done
+    cand = proj.alice.get(f"{proj.base}/candidates/{done['candidate']['id']}").json()
+    # The Validator passed everything; only the undecided search holds the model in Draft.
+    assert len(cand["blockers"]) == 1 and "a person must accept or reject" in cand["blockers"][0]
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert snap["state"]["effective_state"] == "draft"
+    [question] = [q for q in snap["questions"] if q["data"]["kind"] == "decision_point"]
+    text = question["data"]["description"]
+    assert question["data"]["is_blocking"] and question["data"]["status"] == "open"
+    assert "Allocate by revenue" in text and "No agreed allocation" in text and "made no further changes" in text
+    decision = snap["decisions"][0]
+    assert {(l["from_id"], l["to_id"]) for l in snap["links"] if l["link_type"] == "concerns"} >= {
+        (question["id"], decision["id"]), (question["id"], proj.profit_req)}
+    point = _point(proj, cand["id"])
+    assert point["question_id"] == question["id"] and point["resolution"] is None
+    assert question["data"]["description"].startswith(f"Decision point {decision['code']}:")
+
+    # An agent can't decide it, even on behalf of a person.
+    with db_session_factory() as s:
+        s.get(User, proj.alice.id).display_name = "Alice Analyst"
+        s.commit()
+        agent = Actor(kind=ActorKind.AGENT, id=proj.alice.id, on_behalf_of=proj.alice.id)
+        tenant_id, project_id = (uuid_of(x) for x in proj.base.split("/")[2::2])
+        scope = tenancy.resolve_project_scope(s, agent, tenant_id, project_id)
+        with pytest.raises(AccessDenied):
+            design.resolve_decision_point(s, scope, uuid_of(point["id"]), "accepted")
+
+    r = proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve",
+                        json={"outcome": "accepted", "note": "Profit by order stays out of scope."})
+    assert r.status_code == 200, r.text
+    res = r.json()["resolution"]
+    assert res["outcome"] == "accepted" and res["user_id"] == str(proj.alice.id)
+    assert res["user_name"] == "Alice Analyst" and res["note"] == "Profit by order stays out of scope."
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    decision = next(d for d in snap["decisions"] if d["id"] == decision["id"])
+    assert decision["data"]["status"] == "confirmed"
+    assert "Accepted by Alice Analyst: Profit by order stays out of scope." in decision["data"]["rationale"]
+    question = next(q for q in snap["questions"] if q["id"] == question["id"])
+    assert question["data"]["status"] == "resolved" and "Alice Analyst" in question["data"]["resolution"]
+    with db_session_factory() as s:  # the register changeset is attributed to her
+        cs = s.scalar(select(Changeset).where(Changeset.seq == res["seq"], Changeset.project_id == uuid_of(
+            proj.base.split("/")[4])))
+        assert cs.actor_kind == "user" and cs.actor_id == proj.alice.id
+    # Nothing else blocks the applied design, so the model is Ready for Review (never Accepted).
+    assert snap["state"]["effective_state"] == "ready_for_review"
+    assert proj.alice.get(f"{proj.base}/candidates/{cand['id']}").json()["blockers"] == []
+    again = proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve", json={"outcome": "rejected"})
+    assert again.status_code == 409 and "already accepted by Alice Analyst" in again.text
+
+
+def test_a_rejected_or_undecided_search_keeps_blocking(proj, db_session_factory):
+    proj.script(*_no_candidate_steps(proj))
+    first = proj.run()[-1]["candidate"]
+    point = _point(proj, first["id"])
+
+    # A second run doesn't sidestep it: the undecided search carries into the new candidate.
+    proj.script(*BASE, {"text": "Reworked the store dimension."})
+    second = proj.run()[-1]["candidate"]
+    cand = proj.alice.get(f"{proj.base}/candidates/{second['id']}").json()
+    assert any("a person must accept or reject" in b for b in cand["blockers"])
+    assert _point(proj, second["id"])["id"] == point["id"]
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert len([q for q in snap["questions"] if q["data"]["kind"] == "decision_point"]) == 1  # not raised twice
+
+    r = proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve", json={"outcome": "rejected"})
+    assert r.status_code == 200 and r.json()["resolution"]["outcome"] == "rejected"
+    cand = proj.alice.get(f"{proj.base}/candidates/{second['id']}").json()
+    assert any("rejected by" in b and "redesign" in b for b in cand["blockers"])
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert snap["decisions"][0]["data"]["status"] == "rejected"
+    assert snap["state"]["effective_state"] == "draft"
+
+    # The redesign run starts clean: a rejected search isn't carried forward.
+    proj.script(*BASE, {"text": "Redesigned."})
+    third = proj.run()[-1]["candidate"]
+    cand = proj.alice.get(f"{proj.base}/candidates/{third['id']}").json()
+    assert not any(b.startswith("decision point:") for b in cand["blockers"])
+
+
+def test_only_an_unselected_search_can_be_decided(proj, monkeypatch):
+    proj.script(*BASE, {"tool_calls": [decision_point(proj)]},
+                propose(alt("Store-day operating profit fact", tables=[STORE_DAY])), score(("C1", 4, "", 0)),
+                {"text": "Done."})
+    done = proj.run()[-1]
+    point = _point(proj, done["candidate"]["id"])
+    assert point["status"] == "selected" and point["question_id"] is None
+    r = proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve", json={"outcome": "accepted"})
+    assert r.status_code == 409 and "nothing to decide" in r.text
+    assert proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve",
+                           json={"outcome": "maybe"}).status_code == 422
+
+
+def uuid_of(s):
+    import uuid
+    return uuid.UUID(s)

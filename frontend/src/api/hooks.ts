@@ -358,3 +358,31 @@ export function useCandidateAction(path: ProjectPath, action: "apply" | "discard
     ]),
   });
 }
+
+/** The candidate's decision-point searches (including undecided ones carried from earlier designs). */
+export function useDecisionPoints(path: ProjectPath, candidateId: string) {
+  return useQuery({
+    queryKey: ["decision-points", path.project_id, candidateId],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/decision-points", {
+      params: { path: { ...path, candidate_id: candidateId } },
+    })),
+  });
+}
+
+/** A person accepts or rejects the design left by a search that ended without a selection. */
+export function useResolveDecisionPoint(path: ProjectPath) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateProjectData(path);
+  return useMutation({
+    mutationFn: (args: { id: string; outcome: "accepted" | "rejected"; note?: string }) =>
+      unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/decision-points/{decision_point_id}/resolve", {
+        params: { path: { ...path, decision_point_id: args.id } },
+        body: { outcome: args.outcome, note: args.note || null },
+      })),
+    onSettled: () => Promise.all([
+      invalidate(),
+      qc.invalidateQueries({ queryKey: ["decision-points", path.project_id] }),
+      qc.invalidateQueries({ queryKey: ["candidate", path.project_id] }),
+    ]),
+  });
+}

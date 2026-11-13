@@ -17,7 +17,8 @@
   Conflicts register, and settles the candidate: applied automatically as one changeset
   (with the findings as CHECK records) when the model is still empty, otherwise `proposed`
   for the user to review as a diff. Ready for Review only when nothing blocks it
-  (design.readiness); acceptance is always a person's decision.
+  (design.readiness); a search that ended without a selection raises a decision_point question
+  and blocks readiness until a person accepts the design. Acceptance is always a person's decision.
 """
 
 import traceback
@@ -53,6 +54,7 @@ from app.persistence.conversations import AgentRun, Conversation, ConversationMe
 from app.persistence.design import CandidateStatus, DesignCandidate
 from app.persistence.modeling import DataModel
 from app.persistence.models import Project
+from app.persistence.search import DecisionPoint, SearchNode
 
 AGENT_NAME = "architect"
 
@@ -265,7 +267,7 @@ def run_design(
             candidate.status = CandidateStatus.FAILED
             record_usage(run, _total_usage(loop, ctx), ctx.changeset_seqs)
             finish_run(session, run, conversation, RunStatus.FAILED, detail, emit, loop.activity,
-                       extra={"candidate": _candidate_event(candidate)})
+                       extra={"candidate": _candidate_event(session, scope, candidate)})
             return
         finally:
             ctx.exits.close()  # close source sessions (MCP server processes)
@@ -283,7 +285,7 @@ def run_design(
         if note:
             text = f"{text}\n\n{note}".strip()
         finish_run(session, run, conversation, status, detail, emit, loop.activity, text=text,
-                   extra={"candidate": _candidate_event(candidate)})
+                   extra={"candidate": _candidate_event(session, scope, candidate)})
 
 
 def _issue_prefix(issue_key: str) -> str:
@@ -357,13 +359,90 @@ def _escalate(session: Session, scope, ctx: ArchitectContext, candidate: DesignC
     return out
 
 
+def _design_key(table: dict[str, Any]) -> str:
+    import json
+
+    def plain(v):
+        if isinstance(v, dict):
+            return {k: plain(x) for k, x in v.items() if k not in ("record_id", "base_seq")}
+        if isinstance(v, list):
+            return [plain(x) for x in v]
+        return v
+    return json.dumps(plain(table), sort_keys=True, default=str)
+
+
+def _raise_decision_questions(session: Session, scope, ctx: ArchitectContext, candidate: DesignCandidate) -> list[str]:
+    """A search that ended without a selection is a person's decision (spec §7): raise one
+    blocking decision_point question per such search, saying what was tried, why each
+    alternative wasn't chosen and what the Architect did afterwards, linked to the decision
+    record and the affected elements. Its readiness blocker clears only when a person accepts
+    the design (design.resolve_decision_point), never when the Architect decides around it."""
+    raised: list[str] = []
+    entries = [dict(e) for e in candidate.content.get("searches", [])]
+    existing = design.element_record_ids(candidate.content)
+    final_tables = {design._key(t["name"]): t for t in candidate.content.get("tables", [])}
+    for entry in entries:
+        if entry.get("status") == "selected" or entry.get("question_id"):
+            continue
+        dp = session.get(DecisionPoint, uuid.UUID(entry["decision_point_id"]))
+        if dp is None or dp.project_id != scope.project_id or dp.resolution is not None:
+            continue
+        nodes = list(session.scalars(select(SearchNode).where(SearchNode.decision_point_id == dp.id)
+                                     .order_by(SearchNode.depth, SearchNode.created_at)))
+        after = next((n for n in nodes if n.id == dp.selected_node_id), None) or next(
+            (n for n in nodes if n.depth == 0), None)
+        tried = [f"- {n.choice.strip().rstrip('.')}: {n.status}" + (f" ({n.reason})" if n.reason else "")
+                 for n in nodes if n.depth > 0 and str(n.status) != "duplicate"]
+        scoped = {design._key(e.split(".")[0]) for e in dp.scope.get("elements", [])}
+        changes: list[str] = []
+        if after is not None:
+            searched = {design._key(t["name"]): t for t in after.content.get("tables", [])}
+            searched_added = set(searched) - {design._key(t["name"]) for n in nodes if n.depth == 0
+                                              for t in n.content.get("tables", [])}
+            for key in sorted(scoped | searched_added | (set(final_tables) - set(searched))):
+                before, now = searched.get(key), final_tables.get(key)
+                if before is None and now is not None:
+                    changes.append(f"added {now['name']}")
+                elif before is not None and now is None:
+                    changes.append(f"removed {before['name']}")
+                elif before is not None and now is not None and _design_key(before) != _design_key(now):
+                    changes.append(f"changed {now['name']}")
+        decision = modeling.get_record(session, scope, dp.decision_id) if dp.decision_id else None
+        outcome = ("only a partial design that doesn't pass every hard check" if str(dp.status) == "partial"
+                   else "no alternative that qualified, so the design was left unchanged")
+        afterwards = (f"After the search, the Architect {', '.join(changes)}." if changes
+                      else "The Architect made no further changes to these tables after the search.")
+        text = (f"Decision point{f' {decision.code}' if decision and decision.code else ''}: {dp.question} "
+                f"The bounded search ({str(dp.trigger).replace('_', ' ')}) found {outcome} "
+                f"({dp.stop_reason}).\nAlternatives tried:\n" + "\n".join(tried or ["- none"]) + f"\n{afterwards}")
+        ops: list = [CreateOp(type=RecordType.QUESTION, ref="q", data={
+            "kind": "decision_point", "description": text[:8000], "is_blocking": True,
+            "impact": "The model stays Draft until a person accepts or rejects this design.",
+            "proposed_action": "Accept the design as it stands, or reject it so the Architect redesigns it."})]
+        targets = [dp.decision_id] if dp.decision_id else []
+        targets += [uuid.UUID(r) for r in dp.scope.get("requirement_ids", [])]
+        targets += [existing[k] for k in scoped if k in existing]
+        for target in dict.fromkeys(targets):
+            ops.append(LinkOp(from_id="$q", to_id=target, link_type=LinkType.CONCERNS))
+        result = modeling.apply_changeset(session, scope, ops, reason=f"{ctx.reason}: decision point needs a person")
+        ctx.changeset_seqs.append(result.seq)
+        question = modeling.get_record(session, scope, result.created["q"])
+        dp.question_id = question.id
+        entry["question_id"] = str(question.id)
+        raised.append(question.code or "")
+        ctx.changed.append({"id": str(question.id), "code": question.code or "", "type": "question"})
+    if raised:
+        candidate.content = {**candidate.content, "searches": entries}
+    return raised
+
+
 def _validation_note(candidate: DesignCandidate, skipped: str | None, corrections: int,
                      escalated: dict[str, list[str]]) -> str:
     if skipped:
-        return f"_Not validated: {skipped}. The design is unverified until the Validator reviews it._"
+        return f"_Not validated: {skipped}. The design is unverified until the Validator reviews it._" + _search_note(escalated)
     rounds = candidate.validation or []
     if not rounds:
-        return ""
+        return _search_note(escalated).strip()
     last = rounds[-1]
     if last["status"] != "completed":
         return f"_The Validator's review didn't complete ({last.get('detail')}); the design is unverified._"
@@ -377,7 +456,14 @@ def _validation_note(candidate: DesignCandidate, skipped: str | None, correction
         note += f" _Raised {', '.join(escalated['raised'])} for what remains open._"
     if escalated["linked"]:
         note += f" _Open findings are linked to {', '.join(escalated['linked'])}, already open._"
-    return note
+    return note + _search_note(escalated)
+
+
+def _search_note(escalated: dict[str, list[str]]) -> str:
+    if not escalated.get("searches"):
+        return ""
+    return (f" _A decision-point search ended without a selected design, so {', '.join(escalated['searches'])} "
+            "asks you to accept or reject the design as it stands._")
 
 
 def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCandidate, *, refused: bool,
@@ -392,9 +478,10 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
 
     # Escalate before applying: a register change after the readiness event would reset it to Draft.
     escalated = _escalate(session, scope, ctx, candidate)
+    escalated["searches"] = _raise_decision_questions(session, scope, ctx, candidate)
     session.commit()
     validation = _validation_note(candidate, skipped, corrections, escalated)
-    ready, blockers = design.readiness(candidate)
+    ready, blockers = design.candidate_readiness(session, scope, candidate)
     blocker_list = "\n".join(f"- {b}" for b in blockers)
 
     if design.model_is_empty(session, scope, candidate.model_id) and not design.is_stale(session, scope, candidate):
@@ -420,8 +507,8 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
                     f"them._ {validation}\n\n{state}"}
 
 
-def _candidate_event(candidate: DesignCandidate) -> dict[str, Any]:
-    ready, blockers = design.readiness(candidate)
+def _candidate_event(session: Session, scope, candidate: DesignCandidate) -> dict[str, Any]:
+    ready, blockers = design.candidate_readiness(session, scope, candidate)
     return {"id": str(candidate.id), "status": str(candidate.status), "applied_seq": candidate.applied_seq,
             "hard_failures": len(design.hard_failures(candidate.internal_checks or [])),
             "ready_for_review": ready and candidate.status is CandidateStatus.APPLIED, "blockers": len(blockers)}

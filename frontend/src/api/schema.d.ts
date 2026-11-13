@@ -173,7 +173,8 @@ export interface paths {
         /**
          * List Decision Points
          * @description The candidate's decision-point searches: every node considered, its scores and why it
-         *     was kept, pruned, rejected or selected.
+         *     was kept, pruned, rejected or selected. Includes searches carried over from an earlier
+         *     candidate that a person hasn't decided yet.
          */
         get: operations["list_decision_points_tenants__tenant_id__projects__project_id__candidates__candidate_id__decision_points_get"];
         put?: never;
@@ -248,6 +249,28 @@ export interface paths {
         put?: never;
         /** Send Message */
         post: operations["send_message_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/decision-points/{decision_point_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Decision Point
+         * @description A person accepts or rejects the design left by a search that ended without a selection.
+         *     Recorded with who decided; agents can't call it (403). 409 if there is nothing to decide or
+         *     it was already decided.
+         */
+        post: operations["resolve_decision_point_tenants__tenant_id__projects__project_id__decision_points__decision_point_id__resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1084,6 +1107,9 @@ export interface components {
             nodes: components["schemas"]["SearchNodeOut"][];
             /** Question */
             question: string;
+            /** Question Id */
+            question_id: string | null;
+            resolution: components["schemas"]["Resolution"] | null;
             /** Scope */
             scope: {
                 [key: string]: unknown;
@@ -1490,7 +1516,7 @@ export interface components {
          * QuestionKind
          * @enum {string}
          */
-        QuestionKind: "clarification" | "contradiction" | "missing_information" | "validation_finding";
+        QuestionKind: "clarification" | "contradiction" | "missing_information" | "validation_finding" | "decision_point";
         /**
          * QuestionStatus
          * @enum {string}
@@ -1713,6 +1739,40 @@ export interface components {
             origin_ref?: string | null;
             /** Statement */
             statement: string;
+        };
+        /** Resolution */
+        Resolution: {
+            /** Note */
+            note: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "accepted" | "rejected";
+            /**
+             * Resolved At
+             * Format: date-time
+             */
+            resolved_at: string;
+            /** Seq */
+            seq: number | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** User Name */
+            user_name: string;
+        };
+        /** ResolveIn */
+        ResolveIn: {
+            /** Note */
+            note?: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "accepted" | "rejected";
         };
         /** RunOut */
         RunOut: {
@@ -2647,6 +2707,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_decision_point_tenants__tenant_id__projects__project_id__decision_points__decision_point_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_point_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionPointOut"];
+                };
             };
             /** @description Validation Error */
             422: {

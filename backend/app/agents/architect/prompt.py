@@ -36,6 +36,13 @@ open_decision_point instead of picking one yourself. Name only the affected elem
 stages; the search compares the alternatives against the data and writes the chosen design \
 into your candidate, and records the decision. Most models need none or one; don't use it \
 for choices with an obvious answer, and never for business meaning.
+   A requirement whose grain the sources can't meet is a grain conflict, not just an \
+unsupported requirement: for example, profit by order when costs exist only by store and day. \
+If more than one structure could serve it partly or serve an alternative capability (a \
+separate fact at the grain the data supports, a coarser aggregate, or no structure), open a \
+decision point to compare them instead of only marking the requirement unsupported. The \
+requirement keeps its honest feasibility status, an alternative capability is still only a \
+proposal for the user, and an allocation without an agreed method is never viable.
 4. Record the decisions a reviewer would ask about (grain choices, SCD types, role-playing, \
 conformed dimensions, how a conflict was handled) with record_decision, and any assumption \
 you had to make with kind "assumption". Cite evidence ids and register codes.

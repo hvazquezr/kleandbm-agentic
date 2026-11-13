@@ -60,6 +60,7 @@ class DecisionPoint(Base):
             ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
             ondelete="CASCADE", name="fk_decision_points_run",
         ),
+        ForeignKeyConstraint(["resolved_by"], ["users.id"], name="fk_decision_points_resolved_by"),
         Index("ix_decision_points_candidate", "project_id", "candidate_id"),
     )
 
@@ -78,6 +79,13 @@ class DecisionPoint(Base):
     stop_reason: Mapped[str | None] = mapped_column(String(200))
     selected_node_id: Mapped[uuid.UUID | None] = mapped_column()
     decision_id: Mapped[uuid.UUID | None] = mapped_column()  # the decision register entry
+    # A search that ended without a selection is decided by a person: the question raised for
+    # it, and who resolved it, when and how ({"outcome": accepted|rejected, "note", "user_name",
+    # "seq"}, seq being the register changeset that recorded it). Agents never resolve one.
+    question_id: Mapped[uuid.UUID | None] = mapped_column()
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column()
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # {"model_calls", "tool_calls", "input_tokens", "output_tokens", "seconds"} and the budgets.
     usage: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

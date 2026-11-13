@@ -205,6 +205,17 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
             print(f"  FINDING {f['issue_key']} [{f['check_type']}] {f['status']}{' BLOCKING' if f['is_blocking'] else ''}"
                   f": {f['summary']} | evidence={[e['kind'] for e in f['evidence']]} | fix={f.get('recommended_action')}")
     print("ATTEMPTS", cand["issue_attempts"], "READY", cand["ready_for_review"], "BLOCKERS", cand["blockers"])
+    for dp in alice.get(f"{base}/candidates/{done['candidate']['id']}/decision-points").json():
+        print(f"DECISION POINT [{dp['trigger']}] {dp['status']} ({dp['stop_reason']}): {dp['question']}")
+        print(f"  scope={dp['scope'].get('elements')} stages={dp['scope'].get('stages')} usage={dp['usage']}")
+        for n in dp["nodes"]:
+            e = n["evaluation"]
+            print(f"  {'  ' * n['depth']}NODE d{n['depth']} {n['stage'] or ''} {n['status']}: {n['choice']} "
+                  f"| total={e.get('total')} scores={e.get('scores')} hard={e.get('hard_violation')} "
+                  f"stage_fail={e.get('stage_hard_failures')} unverified={e.get('unverified_critical')} "
+                  f"| tables={n['tables']} | {n['reason']}")
+            if e.get("assessment"):
+                print(f"  {'  ' * n['depth']}  assessment: {e['assessment']}")
     print("STATE", snap["state"])
     print("REPLY", alice.get(f"{base}/conversations/{conv['id']}/messages").json()[-1]["text"])
 

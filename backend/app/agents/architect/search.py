@@ -234,6 +234,7 @@ def apply_alternative(parent: Workspace, alt: dict[str, Any], scope: dict[str, A
     ws = Workspace(copy.deepcopy(parent.content))
     allowed = _affected_tables(scope)
     req_ids = set(scope["requirement_ids"])
+    by_code = {(r.code or "").lower(): str(r.id) for r in requirements if str(r.id) in req_ids}
     try:
         for name in alt.get("remove_tables") or []:
             if _key(name) not in allowed:
@@ -253,9 +254,11 @@ def apply_alternative(parent: Workspace, alt: dict[str, Any], scope: dict[str, A
         if rels:
             design.put_relationships(ws, rels, requirements)
         for m in alt.get("mappings") or []:
-            if m["requirement_id"] not in req_ids:
+            rid = str(m["requirement_id"]).strip()
+            rid = by_code.get(rid.lower(), rid)  # models sometimes cite the code (REQ-003) instead of the id
+            if rid not in req_ids:
                 return None, f"maps requirement {m['requirement_id']}, which this decision point doesn't affect"
-            design.map_requirement(ws, uuid.UUID(m["requirement_id"]), m.get("elements") or [],
+            design.map_requirement(ws, uuid.UUID(rid), m.get("elements") or [],
                                    _none_if_empty(m.get("note")), requirements)
     except (InvalidOperation, ValueError, KeyError) as exc:
         return None, f"couldn't be applied: {exc}"
@@ -293,7 +296,9 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
                emit=lambda _: None) -> DecisionPoint:
     session, scope_, candidate = ctx.session, ctx.scope, ctx.candidate
     requirements = ctx.requirements()
-    req_text = {str(r.id): f"{r.code}: {r.data.get('statement')}" for r in requirements}
+    # Briefs give each requirement's id with its code, so alternatives can map it by id.
+    req_text = {str(r.id): {"requirement_id": str(r.id), "code": r.code, "statement": r.data.get("statement")}
+                for r in requirements}
     stages = [s for s in STAGES if s in stages]
     budget = Budget(settings)
     scope = {"elements": elements, "requirement_ids": requirement_ids, "stages": stages, "issue_key": issue_key,
@@ -312,7 +317,9 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
     session.add(root)
     session.commit()
     nodes: dict[str, SearchNode] = {str(root.id): root}
-    seen = {_signature(root_ws.content)}
+    # Dedupe among alternatives only: "leave the design as it is" is a real alternative to
+    # evaluate, even though it equals the root.
+    seen: set[str] = set()
     tables = _affected_tables(scope)
     emit({"type": "search", "status": "started", "decision_point_id": str(dp.id), "question": question,
           "stages": stages})
@@ -549,7 +556,7 @@ def _record_decision(ctx: at.ArchitectContext, dp: DecisionPoint, best: SearchNo
     Decisions & Assumptions log (spec §7), linked to the affected requirements and elements."""
     others = [n for n in considered if best is None or n.id != best.id]
     if best is not None:
-        chosen = " → ".join(path(best))
+        chosen = " → ".join(c.strip().rstrip(".") for c in path(best))
         statement = f"{dp.question} Chosen: {chosen}."
         if dp.status != SearchStatus.SELECTED:
             statement += " (Best partial design: it doesn't pass every hard check yet.)"

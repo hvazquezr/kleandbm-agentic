@@ -1052,6 +1052,28 @@
             "title": "Question",
             "type": "string"
           },
+          "question_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Resolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scope": {
             "additionalProperties": true,
             "title": "Scope",
@@ -1106,7 +1128,9 @@
           "usage",
           "created_at",
           "finished_at",
-          "nodes"
+          "nodes",
+          "question_id",
+          "resolution"
         ],
         "title": "DecisionPointOut",
         "type": "object"
@@ -2144,7 +2168,8 @@
           "clarification",
           "contradiction",
           "missing_information",
-          "validation_finding"
+          "validation_finding",
+          "decision_point"
         ],
         "title": "QuestionKind",
         "type": "string"
@@ -2804,6 +2829,93 @@
           "origin_kind"
         ],
         "title": "RequirementData",
+        "type": "object"
+      },
+      "Resolution": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "user_name": {
+            "title": "User Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "note",
+          "user_id",
+          "user_name",
+          "resolved_at",
+          "seq"
+        ],
+        "title": "Resolution",
+        "type": "object"
+      },
+      "ResolveIn": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "ResolveIn",
         "type": "object"
       },
       "RunOut": {
@@ -4357,7 +4469,7 @@
     },
     "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/decision-points": {
       "get": {
-        "description": "The candidate's decision-point searches: every node considered, its scores and why it\nwas kept, pruned, rejected or selected.",
+        "description": "The candidate's decision-point searches: every node considered, its scores and why it\nwas kept, pruned, rejected or selected. Includes searches carried over from an earlier\ncandidate that a person hasn't decided yet.",
         "operationId": "list_decision_points_tenants__tenant_id__projects__project_id__candidates__candidate_id__decision_points_get",
         "parameters": [
           {
@@ -4847,6 +4959,85 @@
         "summary": "Send Message",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/decision-points/{decision_point_id}/resolve": {
+      "post": {
+        "description": "A person accepts or rejects the design left by a search that ended without a selection.\nRecorded with who decided; agents can't call it (403). 409 if there is nothing to decide or\nit was already decided.",
+        "operationId": "resolve_decision_point_tenants__tenant_id__projects__project_id__decision_points__decision_point_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_point_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Point Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionPointOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Decision Point",
+        "tags": [
+          "design"
         ]
       }
     },

@@ -71,6 +71,9 @@ class AssistantTurn:
         }
 
 
+MAX_RETRIES = 4
+
+
 class LLMError(Exception):
     """The provider failed in a way the agent can't recover from within this run."""
 
@@ -99,7 +102,9 @@ class AnthropicChatModel:
 
         if not api_key:
             raise LLMError("KLEANDBM_ANTHROPIC_API_KEY is not set; add it to backend/.env")
-        self._client = anthropic.Anthropic(api_key=api_key)
+        # The SDK retries rate limits, overloads and 5xx with backoff; long agent runs make
+        # many calls, so allow a few more retries than the default two.
+        self._client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
         self._anthropic = anthropic
         self.model = model
         self.effort = effort
@@ -202,7 +207,7 @@ class OpenAIChatModel:
 
         if not api_key:
             raise LLMError("KLEANDBM_OPENAI_API_KEY is not set; add it to backend/.env")
-        self._client = openai.OpenAI(api_key=api_key)
+        self._client = openai.OpenAI(api_key=api_key, max_retries=MAX_RETRIES)
         self._openai = openai
         self.model = model
         self.effort = effort

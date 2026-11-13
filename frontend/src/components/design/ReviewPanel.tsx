@@ -7,6 +7,8 @@ import { useConfirm } from "@/components/editor/useConfirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { humanize } from "@/lib/labels";
+import { buildTrace } from "@/lib/trace";
+import { DecisionPoints } from "./DecisionPoints";
 import { cn } from "@/lib/utils";
 
 /** A Validator finding, as stored on the candidate's review rounds. */
@@ -115,6 +117,7 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
     for (const r of [...snapshot.requirements, ...snapshot.questions]) m.set(r.id, { code: r.code, id: r.id });
     return m;
   }, [snapshot]);
+  const trace = useMemo(() => buildTrace(snapshot), [snapshot]);
 
   const doApply = async () => {
     try {
@@ -168,6 +171,8 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
       {open && candidate.stale && canEdit && (
         <Button size="sm" variant="ghost" disabled={discard.isPending} onClick={doDiscard}>Discard this design</Button>
       )}
+
+      <DecisionPoints path={path} candidateId={candidate.id} canEdit={canEdit} trace={trace} onSelectRecord={onSelectRecord} />
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="size-4" /> Validator review</h3>

@@ -14,6 +14,7 @@ export type Operation = Schemas["ChangesetIn"]["operations"][number];
 export type ModelState = Schemas["StateOut"]["effective_state"];
 export type Candidate = Schemas["CandidateOut"];
 export type CandidateSummary = Schemas["CandidateSummary"];
+export type DecisionPoint = Schemas["DecisionPointOut"];
 
 let tokenGetter: (() => Promise<string>) | null = null;
 

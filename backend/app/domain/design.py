@@ -31,24 +31,28 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain import modeling
-from app.domain.access import ActorKind, NotFoundInScope, Permission, ProjectScope
+from app.domain.access import AccessDenied, ActorKind, NotFoundInScope, Permission, ProjectScope
 from app.domain.modeling import CreateOp, DeleteOp, LinkOp, UpdateOp
 from app.domain.records import (
     Additivity,
     AttributeRole,
     Cardinality,
     CheckStatus,
+    DecisionStatus,
     FeasibilityStatus,
     LinkType,
     LogicalType,
     ModelState,
+    QuestionStatus,
     RecordType,
     ScdType,
     TableKind,
 )
 from app.domain.tenancy import InvalidOperation
 from app.persistence.design import CandidateStatus, DesignCandidate
+from app.persistence.models import User
 from app.persistence.modeling import Changeset
+from app.persistence.search import DecisionPoint
 
 TABLE_FIELDS = ("name", "kind", "grain", "description", "scd_type")
 ATTRIBUTE_FIELDS = ("name", "logical_type", "role", "is_nullable", "additivity", "description", "ordinal")
@@ -83,6 +87,14 @@ def start_candidate(
         # Per-issue correction allowances carry across review episodes (spec §7).
         issue_attempts=dict(previous.issue_attempts or {}) if previous else {},
     )
+    if previous is not None:
+        # A search that ended without a selection keeps blocking readiness until a person
+        # decides it; a new run can't sidestep it by designing around it.
+        resolutions = search_resolutions(session, scope, previous)
+        carried = [s for s in previous.content.get("searches", [])
+                   if s.get("status") != "selected" and s.get("decision_point_id") not in resolutions]
+        if carried:
+            candidate.content = {**candidate.content, "searches": copy.deepcopy(carried)}
     session.add(candidate)
     session.flush()
     return candidate
@@ -611,13 +623,40 @@ def latest_findings(candidate: DesignCandidate) -> list[dict[str, Any]] | None:
     return done[-1]["findings"] if done else None
 
 
-def readiness(candidate: DesignCandidate) -> tuple[bool, list[str]]:
+def search_resolutions(session: Session, scope: ProjectScope, candidate: DesignCandidate) -> dict[str, dict[str, Any]]:
+    """How people resolved the candidate's unselected searches, by decision point id."""
+    ids = [uuid.UUID(s["decision_point_id"]) for s in candidate.content.get("searches", [])
+           if s.get("status") != "selected" and s.get("decision_point_id")]
+    if not ids:
+        return {}
+    points = session.scalars(select(DecisionPoint).where(
+        DecisionPoint.tenant_id == scope.tenant_id, DecisionPoint.project_id == scope.project_id,
+        DecisionPoint.id.in_(ids), DecisionPoint.resolution.is_not(None)))
+    return {str(dp.id): dp.resolution for dp in points}
+
+
+def candidate_readiness(session: Session, scope: ProjectScope, candidate: DesignCandidate) -> tuple[bool, list[str]]:
+    return readiness(candidate, search_resolutions(session, scope, candidate))
+
+
+def readiness(candidate: DesignCandidate, resolutions: dict[str, dict[str, Any]] | None = None) -> tuple[bool, list[str]]:
     """Whether applying the candidate may mark the model Ready for Review, and what blocks it:
-    failed hard internal checks, blocking findings that failed or couldn't be verified, or no
+    failed hard internal checks, a decision-point search that ended without a selection and
+    that no person has accepted, blocking findings that failed or couldn't be verified, or no
     completed review at all (an unreviewed design is unverified, never a pass)."""
     blockers = [f"{c['name']}: {c['summary']}" for c in hard_failures(candidate.internal_checks or [])]
-    blockers += [f"decision point: {s['question']} (the search ended {str(s['status']).replace('_', ' ')})"
-                 for s in candidate.content.get("searches", []) if s.get("status") != "selected"]
+    for s in candidate.content.get("searches", []):
+        if s.get("status") == "selected":
+            continue
+        res = (resolutions or {}).get(s.get("decision_point_id") or "")
+        if res and res.get("outcome") == "accepted":
+            continue
+        if res:
+            blockers.append(f"decision point: {s['question']} (rejected by {res.get('user_name')}; "
+                            "ask the Architect to redesign it)")
+        else:
+            blockers.append(f"decision point: {s['question']} (the search ended "
+                            f"{str(s['status']).replace('_', ' ')}; a person must accept or reject the design)")
     findings = latest_findings(candidate)
     if findings is None:
         blockers.append("validation: the Validator hasn't reviewed this design")
@@ -699,7 +738,7 @@ def apply_candidate(session: Session, scope: ProjectScope, candidate_id: uuid.UU
     candidate.status = CandidateStatus.APPLIED
     candidate.applied_by = _user(scope)
     candidate.applied_at = datetime.now(UTC)
-    ready, _ = readiness(candidate)
+    ready, _ = candidate_readiness(session, scope, candidate)
     if ready and candidate.applied_seq:
         # Readiness, never acceptance: only a person with approval authority accepts.
         modeling.set_state(session, scope, candidate.model_id, ModelState.READY_FOR_REVIEW,
@@ -711,3 +750,94 @@ def apply_candidate(session: Session, scope: ProjectScope, candidate_id: uuid.UU
 def model_is_empty(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> bool:
     snapshot = modeling.get_snapshot(session, scope, model_id)
     return not snapshot.records[RecordType.TABLE]
+
+
+# --- Decision points decided by a person ----------------------------------------------------
+
+
+def get_decision_point(session: Session, scope: ProjectScope, decision_point_id: uuid.UUID) -> DecisionPoint:
+    scope.require(Permission.PROJECT_READ)
+    dp = session.scalar(select(DecisionPoint).where(
+        DecisionPoint.tenant_id == scope.tenant_id, DecisionPoint.project_id == scope.project_id,
+        DecisionPoint.id == decision_point_id))
+    if dp is None:
+        raise NotFoundInScope("decision point")
+    return dp
+
+
+def resolve_decision_point(
+    session: Session, scope: ProjectScope, decision_point_id: uuid.UUID, outcome: str, note: str | None = None
+) -> DecisionPoint:
+    """A person decides a search that ended without a selection (spec §7): `accepted` keeps
+    the design as it stands and clears the readiness blocker; `rejected` keeps the model in
+    Draft until the Architect redesigns it. Recorded three ways, all naming the person: one
+    register changeset by them (the decision confirmed or rejected, the question resolved), and
+    the resolution on the decision point. If nothing else blocks the model's applied design,
+    accepting makes it Ready for Review (never Accepted)."""
+    scope.require(Permission.PROJECT_EDIT)
+    if scope.actor.kind is not ActorKind.USER:
+        raise AccessDenied("only a person can decide a decision point")
+    if outcome not in ("accepted", "rejected"):
+        raise InvalidOperation("the outcome is accepted or rejected")
+    dp = get_decision_point(session, scope, decision_point_id)
+    if str(dp.status) not in ("partial", "no_candidate"):
+        raise InvalidOperation(f"this search ended {dp.status}; there is nothing to decide")
+    if dp.resolution is not None:
+        raise InvalidOperation(f"this decision point was already {dp.resolution['outcome']} "
+                               f"by {dp.resolution.get('user_name')}")
+    user = session.get(User, scope.actor.id)
+    name = (user.display_name or user.email) if user else None
+    name = name or "a project member"
+    verb = "Accepted" if outcome == "accepted" else "Rejected"
+    stamp = f"{verb} by {name}" + (f": {note.strip()}" if note and note.strip() else ".")
+    ops: list = []
+    if dp.decision_id:
+        decision = _live_record(session, scope, dp.decision_id)
+        if decision is not None:
+            rationale = f"{decision.data.get('rationale') or ''}\n\n{stamp}".strip()[:8000]
+            ops.append(UpdateOp(id=decision.id, expected_seq=decision.seq, data={
+                "status": (DecisionStatus.CONFIRMED if outcome == "accepted" else DecisionStatus.REJECTED).value,
+                "rationale": rationale}))
+    if dp.question_id:
+        question = _live_record(session, scope, dp.question_id)
+        if question is not None:
+            ops.append(UpdateOp(id=question.id, expected_seq=question.seq, data={
+                "status": QuestionStatus.RESOLVED.value, "resolution": stamp[:8000]}))
+    seq = None
+    if ops:
+        result = modeling.apply_changeset(session, scope, ops,
+                                          reason=f"Decision point {verb.lower()} by {name}")
+        seq = result.seq
+    dp.resolved_by = scope.actor.id
+    dp.resolved_at = datetime.now(UTC)
+    dp.resolution = {"outcome": outcome, "note": (note or "").strip() or None, "user_name": name, "seq": seq}
+    session.flush()
+    if outcome == "accepted":
+        _ready_after_decision(session, scope, dp, name)
+    return dp
+
+
+def _live_record(session: Session, scope: ProjectScope, record_id: uuid.UUID):
+    try:
+        return modeling.get_record(session, scope, record_id)
+    except NotFoundInScope:
+        return None
+
+
+def _ready_after_decision(session: Session, scope: ProjectScope, dp: DecisionPoint, name: str) -> None:
+    """Mark the model Ready for Review if its applied design now has no blockers and the model
+    hasn't changed since it was applied."""
+    applied = session.scalar(select(DesignCandidate).where(
+        DesignCandidate.project_id == scope.project_id, DesignCandidate.model_id == dp.model_id,
+        DesignCandidate.status == CandidateStatus.APPLIED).order_by(DesignCandidate.applied_at.desc()).limit(1))
+    if applied is None or not applied.applied_seq:
+        return
+    if str(dp.id) not in {s.get("decision_point_id") for s in applied.content.get("searches", [])}:
+        return
+    changed = session.scalar(select(func.count()).select_from(Changeset).where(
+        Changeset.project_id == scope.project_id, Changeset.model_id == dp.model_id,
+        Changeset.seq > applied.applied_seq))
+    ready, _ = candidate_readiness(session, scope, applied)
+    if ready and not changed:
+        modeling.set_state(session, scope, dp.model_id, ModelState.READY_FOR_REVIEW,
+                           note=f"Decision point accepted by {name}; design candidate {applied.id} has no other blockers")

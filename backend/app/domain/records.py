@@ -139,6 +139,9 @@ class QuestionKind(enum.StrEnum):
     CONTRADICTION = "contradiction"
     MISSING_INFORMATION = "missing_information"
     VALIDATION_FINDING = "validation_finding"
+    # A decision-point search ended without a selected design; a person accepts or rejects
+    # the design as it stands (spec §7).
+    DECISION_POINT = "decision_point"
 
 
 class QuestionStatus(enum.StrEnum):
