@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,12 @@ class Settings(BaseSettings):
     # Token permissions (Auth0 RBAC "permissions" claim) every API call must carry.
     # Empty means only the application-level tenant/project checks apply.
     auth_required_permissions: list[str] = []
+
+    @field_validator("auth_issuer")
+    @classmethod
+    def _issuer_trailing_slash(cls, value: str) -> str:
+        # Auth0's "iss" claim always ends with "/", and issuer validation is an exact match.
+        return value if not value or value.endswith("/") else value + "/"
 
     @property
     def jwks_url(self) -> str:

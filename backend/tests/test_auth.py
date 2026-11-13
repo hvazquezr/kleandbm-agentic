@@ -61,3 +61,13 @@ def test_required_permissions_enforced(signing_key, make_token):
 def test_verifier_requires_issuer_and_audience():
     with pytest.raises(ValueError):
         TokenVerifier(issuer="", audience=AUDIENCE, key_resolver=lambda _t: None)
+
+
+def test_issuer_setting_gets_trailing_slash():
+    from app.config import Settings
+
+    assert Settings(auth_issuer="https://t.us.auth0.com").auth_issuer == "https://t.us.auth0.com/"
+    assert Settings(auth_issuer="https://t.us.auth0.com/").auth_issuer == "https://t.us.auth0.com/"
+    assert Settings(auth_issuer="https://t.us.auth0.com").jwks_url == (
+        "https://t.us.auth0.com/.well-known/jwks.json"
+    )
