@@ -21,11 +21,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.embeddings import FakeEmbedder
+from app.adapters.storage import LocalObjectStore
 from app.api.auth import TokenVerifier
 from app.config import get_settings
 from app.main import create_app
 from app.persistence.db import get_session
-from app.persistence import modeling as _modeling_tables  # noqa: F401  (registers tables)
+from app.persistence import documents as _document_tables, modeling as _modeling_tables  # noqa: F401  (registers tables)
 from app.persistence.models import Base
 
 ISSUER = "https://test-issuer.example/"
@@ -102,8 +104,13 @@ def db_session_factory(db_engine) -> Iterator[sessionmaker[Session]]:
 
 
 @pytest.fixture
-def client(db_session_factory, verifier) -> Iterator[TestClient]:
-    app = create_app(token_verifier=verifier)
+def object_store(tmp_path) -> LocalObjectStore:
+    return LocalObjectStore(tmp_path / "objects")
+
+
+@pytest.fixture
+def client(db_session_factory, verifier, object_store) -> Iterator[TestClient]:
+    app = create_app(token_verifier=verifier, object_store=object_store, embedder=FakeEmbedder(1536))
 
     def _session() -> Iterator[Session]:
         session = db_session_factory()

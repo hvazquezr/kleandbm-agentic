@@ -23,6 +23,24 @@ class Settings(BaseSettings):
     # Empty means only the application-level tenant/project checks apply.
     auth_required_permissions: list[str] = []
 
+    # Document storage. "local" keeps files under local_storage_dir (development and tests);
+    # "s3" uses the bucket below, with credentials from the standard AWS chain (env vars,
+    # ~/.aws profile, or an instance role).
+    storage_backend: str = "local"
+    local_storage_dir: str = "../var/objects"
+    s3_bucket: str = ""
+    s3_prefix: str = "kleandbm/"
+    s3_region: str = ""
+    max_upload_bytes: int = 25 * 1024 * 1024
+
+    # Embeddings for document retrieval. "fake" is deterministic and offline (tests and
+    # development without a key); "openai" calls the OpenAI embeddings API.
+    embedding_provider: str = "fake"
+    embedding_model: str = "text-embedding-3-small"
+    # Must match the vector column width in the migration (text-embedding-3-small: 1536).
+    embedding_dimensions: int = 1536
+    openai_api_key: str = ""
+
     @field_validator("auth_issuer")
     @classmethod
     def _issuer_trailing_slash(cls, value: str) -> str:

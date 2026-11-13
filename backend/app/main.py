@@ -1,7 +1,10 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from app.adapters.embeddings import Embedder, embedder_from_settings
+from app.adapters.storage import ObjectStore, store_from_settings
 from app.api.auth import TokenVerifier, verifier_from_settings
+from app.api.document_routes import router as document_router
 from app.api.modeling_routes import router as modeling_router
 from app.api.routes import router
 from app.config import get_settings
@@ -10,11 +13,19 @@ from app.domain.modeling import StaleUpdate
 from app.domain.tenancy import InvalidOperation
 
 
-def create_app(token_verifier: TokenVerifier | None = None) -> FastAPI:
+def create_app(
+    token_verifier: TokenVerifier | None = None,
+    object_store: ObjectStore | None = None,
+    embedder: Embedder | None = None,
+) -> FastAPI:
     app = FastAPI(title="KleanDBM API", version="0.1.0")
+    settings = get_settings()
+
+    # Tests inject their own adapters; otherwise they come from settings.
+    app.state.object_store = object_store or store_from_settings(settings)
+    app.state.embedder = embedder or embedder_from_settings(settings)
 
     if token_verifier is None:
-        settings = get_settings()
         if settings.auth_issuer and settings.auth_audience:
             token_verifier = verifier_from_settings(settings)
     # Left as None when auth isn't configured: authenticated routes then return 503.
@@ -53,6 +64,7 @@ def create_app(token_verifier: TokenVerifier | None = None) -> FastAPI:
 
     app.include_router(router)
     app.include_router(modeling_router)
+    app.include_router(document_router)
     return app
 
 
