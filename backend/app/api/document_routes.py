@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.adapters.embeddings import Embedder
 from app.adapters.storage import ObjectStore
+from app.adapters.vision import ImageDescriber
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.config import get_settings
 from app.domain import documents
@@ -30,7 +31,12 @@ def get_embedder(request: Request) -> Embedder:
     return request.app.state.embedder
 
 
+def get_describer(request: Request) -> ImageDescriber | None:
+    return request.app.state.image_describer
+
+
 StoreDep = Annotated[ObjectStore, Depends(get_store)]
+DescriberDep = Annotated[ImageDescriber | None, Depends(get_describer)]
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
 
 
@@ -110,6 +116,7 @@ async def upload_document(
     scope: ProjectScopeDep,
     store: StoreDep,
     embedder: EmbedderDep,
+    describer: DescriberDep,
     file: Annotated[UploadFile, File()],
     title: Annotated[str | None, Form(max_length=255)] = None,
 ) -> DocumentOut:
@@ -117,7 +124,7 @@ async def upload_document(
     version = documents.upload(
         session, scope, store, embedder,
         filename=file.filename or "upload", declared_type=file.content_type, data=data,
-        max_bytes=get_settings().max_upload_bytes, title=title,
+        max_bytes=get_settings().max_upload_bytes, title=title, describer=describer,
     )
     document = documents.get_document(session, scope, version.document_id)
     return DocumentOut(id=document.id, title=document.title, created_at=document.created_at, latest=_version_out(version))
@@ -130,13 +137,14 @@ async def upload_version(
     scope: ProjectScopeDep,
     store: StoreDep,
     embedder: EmbedderDep,
+    describer: DescriberDep,
     file: Annotated[UploadFile, File()],
 ) -> VersionOut:
     data = await _read_limited(file)
     version = documents.upload(
         session, scope, store, embedder,
         filename=file.filename or "upload", declared_type=file.content_type, data=data,
-        max_bytes=get_settings().max_upload_bytes, document_id=document_id,
+        max_bytes=get_settings().max_upload_bytes, document_id=document_id, describer=describer,
     )
     return _version_out(version)
 
@@ -173,6 +181,16 @@ def reembed(
     version_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep, embedder: EmbedderDep
 ) -> VersionOut:
     return _version_out(documents.reembed(session, scope, embedder, version_id))
+
+
+@router.post("/document-versions/{version_id}/reprocess")
+def reprocess(
+    version_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep, store: StoreDep,
+    embedder: EmbedderDep, describer: DescriberDep,
+) -> VersionOut:
+    """Re-extract and re-embed with the current settings, e.g. after switching the embedding
+    model or turning on image reading."""
+    return _version_out(documents.reprocess_version(session, scope, store, embedder, describer, version_id))
 
 
 @router.post("/search")

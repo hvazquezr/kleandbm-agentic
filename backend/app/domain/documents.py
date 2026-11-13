@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.embeddings import Embedder
@@ -18,10 +18,14 @@ from app.adapters.extraction import (
     STORED_ONLY_TYPES,
     SUPPORTED_TYPES,
     ExtractionError,
+    ExtractionResult,
+    Passage,
+    _split_long,
     content_type_for,
     extract,
 )
 from app.adapters.storage import ObjectStore, object_key
+from app.adapters.vision import ImageDescriber, VisionError
 from app.domain.access import NotFoundInScope, Permission, ProjectScope
 from app.domain.tenancy import InvalidOperation
 from app.persistence.documents import (
@@ -71,6 +75,7 @@ def upload(
     max_bytes: int,
     title: str | None = None,
     document_id: uuid.UUID | None = None,
+    describer: ImageDescriber | None = None,
 ) -> DocumentVersion:
     """Store a new document, or a new version of an existing one, then extract and embed it.
 
@@ -125,18 +130,46 @@ def upload(
     # If the database transaction later rolls back, this object is orphaned but unreachable,
     # because only database rows reference keys.
     store.put(key, data, content_type)
-    _process(session, version, data, embedder)
+    _process(session, version, data, embedder, describer)
     return version
 
 
-def _process(session: Session, version: DocumentVersion, data: bytes, embedder: Embedder) -> None:
+IMAGE_NOTE = "[Machine transcription of an image. Verify important figures against the original.]"
+
+
+def _transcribe(data: bytes, version: DocumentVersion, describer: ImageDescriber | None):
+    """Image -> located passages via a vision model. Returns (passages, notes)."""
+    if describer is None:
+        return [], ["Image stored; image reading is not configured, so its content isn't searchable yet."]
     try:
-        result = extract(data, version.content_type)
-    except ExtractionError as exc:
-        version.status = VersionStatus.EXTRACTION_FAILED
-        version.status_detail = str(exc)
-        session.flush()
-        return
+        text = describer.describe(data, version.filename)
+    except VisionError as exc:
+        return [], [f"Image stored, but it couldn't be read: {exc}"]
+    passages = [
+        Passage(f"{IMAGE_NOTE}\n{piece}", {"image": "transcription", "char_start": start, "char_end": end})
+        for piece, start, end in _split_long(text, 0)
+    ]
+    return passages, [f"Text transcribed from the image by {describer.model}; it may contain reading errors."]
+
+
+def _process(
+    session: Session,
+    version: DocumentVersion,
+    data: bytes,
+    embedder: Embedder,
+    describer: ImageDescriber | None = None,
+) -> None:
+    if version.content_type in STORED_ONLY_TYPES:
+        passages_, notes = _transcribe(data, version, describer)
+        result = ExtractionResult(passages=passages_, notes=notes)
+    else:
+        try:
+            result = extract(data, version.content_type)
+        except ExtractionError as exc:
+            version.status = VersionStatus.EXTRACTION_FAILED
+            version.status_detail = str(exc)
+            session.flush()
+            return
     version.notes = result.notes
     if not result.passages:
         version.status = VersionStatus.STORED_ONLY
@@ -192,6 +225,50 @@ def reembed(session: Session, scope: ProjectScope, embedder: Embedder, version_i
     )
     _embed(session, version, passages, embedder)
     return version
+
+
+def reprocess(
+    session: Session,
+    version: DocumentVersion,
+    store: ObjectStore,
+    embedder: Embedder,
+    describer: ImageDescriber | None,
+) -> DocumentVersion:
+    """Re-extract and re-embed one version with the current settings (new embedding model,
+    image reading turned on, better extraction). Passages are derived data, so they're
+    replaced; the stored file and the version record stay as they are.
+
+    Unscoped: callers must authorize first (see reprocess_version) or be an operator script.
+    """
+    data = store.get(version.storage_key)
+    session.execute(delete(DocumentPassage).where(DocumentPassage.version_id == version.id))
+    version.status = VersionStatus.PROCESSING
+    version.status_detail = None
+    version.embedding_model = None
+    session.flush()
+    _process(session, version, data, embedder, describer)
+    return version
+
+
+def reprocess_version(
+    session: Session,
+    scope: ProjectScope,
+    store: ObjectStore,
+    embedder: Embedder,
+    describer: ImageDescriber | None,
+    version_id: uuid.UUID,
+) -> DocumentVersion:
+    scope.require(Permission.PROJECT_EDIT)
+    return reprocess(session, get_version(session, scope, version_id), store, embedder, describer)
+
+
+def needs_reprocessing(version: DocumentVersion, embedder: Embedder, describer: ImageDescriber | None) -> bool:
+    """Stale embeddings, failed embeddings, or images that weren't read and now can be."""
+    if version.status in (VersionStatus.READY, VersionStatus.EMBEDDING_FAILED):
+        return version.embedding_model != embedder.model
+    if version.status is VersionStatus.STORED_ONLY:
+        return version.content_type in STORED_ONLY_TYPES and describer is not None
+    return False
 
 
 # --- Reading --------------------------------------------------------------------------------

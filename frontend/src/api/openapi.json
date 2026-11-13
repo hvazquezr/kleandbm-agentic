@@ -4152,6 +4152,75 @@
         ]
       }
     },
+    "/tenants/{tenant_id}/projects/{project_id}/document-versions/{version_id}/reprocess": {
+      "post": {
+        "description": "Re-extract and re-embed with the current settings, e.g. after switching the embedding\nmodel or turning on image reading.",
+        "operationId": "reprocess_tenants__tenant_id__projects__project_id__document_versions__version_id__reprocess_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__api__document_routes__VersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reprocess",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/tenants/{tenant_id}/projects/{project_id}/documents": {
       "get": {
         "operationId": "list_documents_tenants__tenant_id__projects__project_id__documents_get",

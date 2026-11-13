@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.embeddings import Embedder
 from app.adapters.llm import ChatModel, LLMError, Usage
+from app.adapters.storage import ObjectStore
 from app.agents.requirements.prompt import SYSTEM_PROMPT
 from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext, ToolInputError
 from app.domain import documents, modeling, tenancy
@@ -99,6 +100,7 @@ def run_turn(
     max_iterations: int,
     emit: Emit,
     checkpointer: Any = None,
+    store: ObjectStore | None = None,
 ) -> None:
     """Execute one agent run for the latest user message. Never raises: outcomes are recorded
     on the run and the assistant message, and reported through `emit`."""
@@ -133,7 +135,7 @@ def run_turn(
                     f"</project_context>\n\n{user_msg.text}",
         })
 
-        ctx = ToolContext(session=session, scope=scope, embedder=embedder,
+        ctx = ToolContext(session=session, scope=scope, embedder=embedder, store=store,
                           reason=f"Business Requirements agent run {run.id}")
         usage = Usage()
         activity: list[dict[str, Any]] = []
@@ -176,7 +178,11 @@ def run_turn(
                     if name in WRITE_TOOLS:
                         session.commit()  # make the change visible to the user right away
                     summary = out.pop("summary", name)
-                    results.append({"id": call["id"], "content": json.dumps(out, default=str), "is_error": False})
+                    image = out.pop("__image__", None)
+                    result = {"id": call["id"], "content": json.dumps(out, default=str), "is_error": False}
+                    if image:
+                        result["image"] = image  # shown to the model, never echoed as text
+                    results.append(result)
                     item = {"tool": name, "ok": True, "summary": summary}
                     if "code" in out:
                         item["record"] = {"id": out["id"], "code": out["code"], "type": out["type"]}

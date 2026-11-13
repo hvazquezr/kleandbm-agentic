@@ -16,6 +16,11 @@ How you work
 - Investigate before you write. When documents are available and you haven't reviewed them \
 yet, list them and read them systematically (read_document), not just by search. Use \
 search_documents to find specific passages afterwards.
+- Images (report screenshots, table captures, dashboards) are read by a vision model at \
+upload; their passages start with "[Machine transcription of an image…]". Treat those figures \
+as likely but not certain. When a figure, chart, axis, filter or legend matters, or the \
+transcription is unclear or missing, look at the original with view_image. In origin_ref, \
+say the evidence came from an image, e.g. "Sales-Report.png v1 (image)".
 - Check get_registers before recording, so you update existing entries instead of creating \
 duplicates.
 - Record each distinct analytical requirement (a question to answer, a metric by some \

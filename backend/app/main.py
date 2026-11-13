@@ -7,6 +7,7 @@ from app.adapters.embeddings import Embedder, embedder_from_settings
 from app.adapters.llm import AnthropicChatModel, ChatModel, LLMError, ScriptedChatModel
 from app.adapters.sources import SourceConnector, StdioMySqlConnector
 from app.adapters.storage import ObjectStore, store_from_settings
+from app.adapters.vision import ImageDescriber, describer_from_settings
 from app.api.auth import TokenVerifier, verifier_from_settings
 from app.api.conversation_routes import router as conversation_router
 from app.api.document_routes import router as document_router
@@ -70,6 +71,7 @@ def create_app(
     chat_model_factory=None,
     session_factory=None,
     agent_checkpointer=None,
+    image_describer: ImageDescriber | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -84,6 +86,7 @@ def create_app(
     # Tests inject their own adapters; otherwise they come from settings.
     app.state.object_store = object_store or store_from_settings(settings)
     app.state.embedder = embedder or embedder_from_settings(settings)
+    app.state.image_describer = image_describer or describer_from_settings(settings)
     # Agents run in worker threads with their own sessions, so they need a factory, not a session.
     app.state.session_factory = session_factory or _session_factory()
     app.state.chat_model_factory = chat_model_factory or (lambda: _chat_model_from_settings(settings))

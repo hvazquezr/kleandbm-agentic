@@ -153,7 +153,7 @@ def send_message(
             run_turn(
                 app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
                 chat_model=chat_model, embedder=app_state.embedder, max_iterations=settings.agent_max_iterations,
-                emit=events.put, checkpointer=_checkpointer(app_state),
+                emit=events.put, checkpointer=_checkpointer(app_state), store=app_state.object_store,
             )
         except Exception as exc:  # run_turn records its own outcomes; this catches setup failures
             traceback.print_exc()

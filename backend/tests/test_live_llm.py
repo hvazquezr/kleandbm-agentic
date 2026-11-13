@@ -42,3 +42,22 @@ def test_agent_tool_definitions_are_accepted(model):
 
     turn = model.complete(SYSTEM_PROMPT, [{"role": "user", "text": "List the project's documents."}], TOOL_SPECS)
     assert turn.stop_reason in {"tool_use", "end_turn"}
+
+
+def test_vision_transcribes_a_report_screenshot():
+    """The Northstar Sales Report capture should be read cell by cell, with exact figures."""
+    from pathlib import Path
+
+    from app.adapters.vision import AnthropicImageDescriber
+
+    s = get_settings()
+    if not s.anthropic_api_key:
+        pytest.skip("KLEANDBM_ANTHROPIC_API_KEY not set")
+    image = Path(__file__).resolve().parents[2] / "retail-discovery" / "Sales-Report.png"
+    if not image.exists():
+        pytest.skip("retail-discovery/Sales-Report.png not present")
+    text = AnthropicImageDescriber(s.anthropic_api_key, s.image_description_model, "medium").describe(
+        image.read_bytes(), image.name)
+    for figure in ["1,001,700", "937,602", "38,976", "577,800", "Downtown", "Riverside"]:
+        assert figure in text, figure
+    assert "Profit by order" in text

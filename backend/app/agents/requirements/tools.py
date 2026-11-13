@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.embeddings import Embedder
 from app.adapters.llm import ToolSpec
+from app.adapters.storage import ObjectStore
+from app.adapters.vision import VisionError, prepare_image
 from app.domain import documents, modeling
 from app.domain.access import NotFoundInScope, ProjectScope
 from app.domain.modeling import CreateOp, LinkOp, StaleUpdate, UpdateOp
@@ -67,6 +69,12 @@ TOOL_SPECS = [
         "Use it for systematic review of a document.",
         # Strict tool schemas don't support numeric bounds; the handlers clamp values instead.
         _obj({"version_id": {"type": "string"}, "start": {"type": "integer", "description": "First passage ordinal, 0 or more"}}),
+    ),
+    ToolSpec(
+        "view_image",
+        "Look at an image document (report screenshot, table capture, dashboard) directly. Use it when "
+        "its machine transcription is unclear or you need to check a figure, chart, axis or filter.",
+        _obj({"version_id": {"type": "string"}}),
     ),
     ToolSpec(
         "search_documents",
@@ -165,6 +173,7 @@ class ToolContext:
     scope: ProjectScope  # agent actor on behalf of the user
     embedder: Embedder
     reason: str
+    store: ObjectStore | None = None
     changeset_seqs: list[int] = field(default_factory=list)
     changed: list[dict[str, str]] = field(default_factory=list)  # {"id", "code", "type"}
 
@@ -224,6 +233,32 @@ def read_document(ctx: ToolContext, args: dict) -> dict:
         "passages": [{"ordinal": p.ordinal, "location": p.location, "text": p.text} for p in page],
         "next_start": start + READ_PAGE if start + READ_PAGE < len(passages) else None,
         "summary": f"Read {doc.title} v{version.version_no} passages {start}-{start + len(page) - 1}",
+    }
+
+
+IMAGE_TYPES = {"image/png", "image/jpeg"}
+
+
+def view_image(ctx: ToolContext, args: dict) -> dict:
+    version_id = _uuid(args["version_id"], "version_id")
+    if ctx.store is None:
+        raise ToolInputError("viewing images isn't available in this run")
+    try:
+        version, data = documents.read_content(ctx.session, ctx.scope, ctx.store, version_id)
+    except NotFoundInScope:
+        raise ToolInputError("no such document version in this project") from None
+    if version.content_type not in IMAGE_TYPES:
+        raise ToolInputError("that document isn't an image; use read_document instead")
+    try:
+        image = prepare_image(data)
+    except VisionError as exc:
+        raise ToolInputError(str(exc)) from exc
+    doc = documents.get_document(ctx.session, ctx.scope, version.document_id)
+    # The agent loop attaches "__image__" to the tool result as an image the model can see.
+    return {
+        "__image__": {"media_type": image.media_type, "data": image.data_b64},
+        "document": doc.title, "version_no": version.version_no,
+        "summary": f"Viewed {doc.title} v{version.version_no}",
     }
 
 
@@ -329,6 +364,7 @@ def link_records(ctx: ToolContext, args: dict) -> dict:
 HANDLERS: dict[str, Callable[[ToolContext, dict], dict]] = {
     "list_documents": list_documents,
     "read_document": read_document,
+    "view_image": view_image,
     "search_documents": search_documents,
     "get_registers": get_registers,
     "record_requirement": record_requirement,

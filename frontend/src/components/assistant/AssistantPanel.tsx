@@ -67,6 +67,9 @@ export function AssistantPanel({
   const [pending, setPending] = useState<{ text: string; attachments: Attachment[] } | null>(null);
   const [liveText, setLiveText] = useState("");
   const [liveTools, setLiveTools] = useState<ToolActivity[]>([]);
+  // The run being streamed. Mid-run refetches bring in its saved user message, which is
+  // already shown as pending, so it's hidden from the history until the run ends.
+  const [liveRunId, setLiveRunId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -113,7 +116,8 @@ export function AssistantPanel({
     try {
       const conv = conversation ?? (await createConversation.mutateAsync({ model_id: modelId, title: "Requirements" }));
       await sendAgentMessage(path, conv.id, { text: sending.text, attachment_version_ids: sending.attachments.map((a) => a.versionId) }, (e: AgentEvent) => {
-        if (e.type === "text") setLiveText((t) => t + e.text);
+        if (e.type === "run") setLiveRunId(e.run_id);
+        else if (e.type === "text") setLiveText((t) => t + e.text);
         else if (e.type === "tool") {
           setLiveTools((ts) => {
             if (e.status === "started") return [...ts, { name: e.name, status: "started" }];
@@ -136,11 +140,12 @@ export function AssistantPanel({
       setPending(null);
       setLiveText("");
       setLiveTools([]);
+      setLiveRunId(null);
       setRunning(false);
     }
   };
 
-  const history = messages.data ?? [];
+  const history = (messages.data ?? []).filter((m) => !(pending && liveRunId && m.run_id === liveRunId));
 
   return (
     <div className={cn("flex flex-col min-h-0", className)}>

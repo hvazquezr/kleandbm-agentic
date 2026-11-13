@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.embeddings import FakeEmbedder
 from app.adapters.storage import LocalObjectStore
+from app.adapters.vision import FakeImageDescriber
 from app.api.auth import TokenVerifier
 from app.config import get_settings
 from app.main import create_app
@@ -115,6 +116,7 @@ def client(db_session_factory, verifier, object_store) -> Iterator[TestClient]:
     app = create_app(
         token_verifier=verifier, object_store=object_store, embedder=FakeEmbedder(1536),
         session_factory=db_session_factory, agent_checkpointer=InMemorySaver(),
+        image_describer=FakeImageDescriber(),
     )
 
     def _session() -> Iterator[Session]:

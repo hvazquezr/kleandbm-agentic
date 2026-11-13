@@ -230,6 +230,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/document-versions/{version_id}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprocess
+         * @description Re-extract and re-embed with the current settings, e.g. after switching the embedding
+         *     model or turning on image reading.
+         */
+        post: operations["reprocess_tenants__tenant_id__projects__project_id__document_versions__version_id__reprocess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/documents": {
         parameters: {
             query?: never;
@@ -2185,6 +2206,39 @@ export interface operations {
         };
     };
     reembed_tenants__tenant_id__projects__project_id__document_versions__version_id__reembed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__api__document_routes__VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reprocess_tenants__tenant_id__projects__project_id__document_versions__version_id__reprocess_post: {
         parameters: {
             query?: never;
             header?: never;

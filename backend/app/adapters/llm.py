@@ -8,7 +8,8 @@ and is only read by the adapter that produced it.
 Transcript entries:
   {"role": "user", "text": str}
   {"role": "assistant", "text": str, "tool_calls": [ToolCall-dict...], "raw": provider data}
-  {"role": "tool", "results": [{"id": str, "content": str, "is_error": bool}]}
+  {"role": "tool", "results": [{"id": str, "content": str, "is_error": bool,
+                                "image": {"media_type": str, "data": base64 str} (optional)}]}
 """
 
 import json
@@ -121,15 +122,19 @@ class AnthropicChatModel:
                 content = entry.get("raw") or [{"type": "text", "text": entry["text"] or "(no text)"}]
                 out.append({"role": "assistant", "content": content})
             elif entry["role"] == "tool":
-                out.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "tool_result", "tool_use_id": r["id"], "content": r["content"],
-                         "is_error": bool(r.get("is_error"))}
-                        for r in entry["results"]
-                    ],
-                })
+                out.append({"role": "user", "content": [AnthropicChatModel._tool_result(r) for r in entry["results"]]})
         return out
+
+    @staticmethod
+    def _tool_result(r: dict[str, Any]) -> dict[str, Any]:
+        content: Any = r["content"]
+        if r.get("image"):  # a tool that returns an image for the model to look at
+            img = r["image"]
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": img["media_type"], "data": img["data"]}},
+                {"type": "text", "text": r["content"]},
+            ]
+        return {"type": "tool_result", "tool_use_id": r["id"], "content": content, "is_error": bool(r.get("is_error"))}
 
     def complete(self, system, transcript, tools, on_text=None) -> AssistantTurn:
         a = self._anthropic

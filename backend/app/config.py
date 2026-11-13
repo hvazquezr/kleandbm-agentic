@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     source_call_timeout_s: float = 20.0
     source_max_result_bytes: int = 200_000
 
+    # Reading images at upload (table captures, dashboards): "anthropic" (Claude vision),
+    # "fake" (tests) or "none" (store images without reading them).
+    image_description_provider: str = "anthropic"
+    image_description_model: str = "claude-opus-5-5"
+    image_description_effort: str = "medium"
+
     # Agents. The Business Requirements agent runs on Claude (spec §7); provider and model are
     # per-agent settings so they can change without code changes.
     anthropic_api_key: str = ""
