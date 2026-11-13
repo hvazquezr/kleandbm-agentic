@@ -1,8 +1,9 @@
-import { ArrowLeft, Network } from "lucide-react";
+import { ArrowLeft, Network, Sparkles } from "lucide-react";
 import { Link, useParams } from "wouter";
 import { useCreateModel, useModels, useProject } from "@/api/hooks";
 import { InlineCreate } from "@/components/InlineCreate";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function ProjectPage() {
@@ -29,12 +30,17 @@ export default function ProjectPage() {
           {project.data?.description && <p className="text-muted-foreground text-sm">{project.data.description}</p>}
         </div>
         {canEdit && (
+          <div className="flex gap-2 items-start">
+          <Link href={`/t/${tenantId}/p/${projectId}/new-model`}>
+            <Button size="sm"><Sparkles className="size-4" /> New model (guided)</Button>
+          </Link>
           <InlineCreate
-            label="New data model"
+            label="Quick create"
             placeholder="Model name"
             pending={createModel.isPending}
             onCreate={(name) => createModel.mutateAsync({ name })}
           />
+          </div>
         )}
       </div>
 

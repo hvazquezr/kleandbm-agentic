@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     source_call_timeout_s: float = 20.0
     source_max_result_bytes: int = 200_000
 
+    # Agents. The Business Requirements agent runs on Claude (spec §7); provider and model are
+    # per-agent settings so they can change without code changes.
+    anthropic_api_key: str = ""
+    requirements_agent_provider: str = "anthropic"  # "anthropic" | "fake" (scripted, tests only)
+    requirements_agent_model: str = "claude-opus-5-5"
+    requirements_agent_effort: str = "high"  # low | medium | high | xhigh | max
+    agent_max_iterations: int = 14  # model calls per run, a hard execution budget
+    agent_max_tokens: int = 16000
+    # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
+    agent_checkpoints: bool = True
+
     @field_validator("auth_issuer")
     @classmethod
     def _issuer_trailing_slash(cls, value: str) -> str:

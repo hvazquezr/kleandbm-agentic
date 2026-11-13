@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased
 
-from app.domain.access import NotFoundInScope, Permission, ProjectScope
+from app.domain.access import ActorKind, NotFoundInScope, Permission, ProjectScope
 from app.domain.records import (
     CODE_PREFIXES,
     LINK_RULES,
@@ -582,6 +582,29 @@ class _ChangesetWriter:
 
     # -- operations
 
+    # Status fields that record a human decision about meaning or design (spec §2, §7).
+    _AUTHORITY_FIELDS = {
+        RecordType.REQUIREMENT: "confirmation_status",
+        RecordType.DEFINITION: "confirmation_status",
+        RecordType.DECISION: "status",
+    }
+    _HUMAN_ONLY_VALUES = {"confirmed", "rejected"}
+
+    def _guard_agent_authority(
+        self, rtype: RecordType, current: dict[str, Any] | None, data: dict[str, Any]
+    ) -> None:
+        """Agents may propose, never decide: they can't confirm or reject meanings or decisions,
+        and they can't alter an entry a person already confirmed. They raise a question instead."""
+        if self.scope.actor.kind is not ActorKind.AGENT or rtype not in self._AUTHORITY_FIELDS:
+            return
+        name = self._AUTHORITY_FIELDS[rtype]
+        new = str(data.get(name))
+        old = str(current.get(name)) if current else None
+        if new in self._HUMAN_ONLY_VALUES and new != old:
+            raise InvalidOperation(f"agents can't set {name} to {new}; only a person can")
+        if old == "confirmed" and current != data:
+            raise InvalidOperation("this entry was confirmed by a person; raise a question instead of changing it")
+
     def _create(self, op: CreateOp) -> None:
         if op.ref is not None and op.ref in self.refs:
             raise InvalidOperation(f"duplicate ref {op.ref}")
@@ -589,6 +612,7 @@ class _ChangesetWriter:
         raw = self._resolve_reference_fields(op.type, op.data)
         payload = PAYLOADS[op.type].model_validate(raw)
         data = payload.model_dump(mode="python")
+        self._guard_agent_authority(op.type, None, data)
         self._check_references(op.type, data)
         record = Record(
             tenant_id=self.scope.tenant_id,
@@ -615,6 +639,7 @@ class _ChangesetWriter:
         )
         merged = {**current, **patch.model_dump(mode="python", exclude_unset=True)}
         data = PAYLOADS[record.record_type].model_validate(merged).model_dump(mode="python")
+        self._guard_agent_authority(record.record_type, current, data)
         self._check_references(record.record_type, data)
         self._write_revision(record, data, deleted=False, created_here=created_here)
 
@@ -751,6 +776,20 @@ class _ChangesetWriter:
         if link is None:
             raise InvalidOperation(f"no live link {op.link_id}")
         link.removed_seq = self.seq
+
+
+def list_live_links(session: Session, scope: ProjectScope) -> list[RecordLink]:
+    """Links that are currently in effect anywhere in the project."""
+    scope.require(Permission.PROJECT_READ)
+    return list(
+        session.scalars(
+            select(RecordLink).where(
+                RecordLink.tenant_id == scope.tenant_id,
+                RecordLink.project_id == scope.project_id,
+                RecordLink.removed_seq.is_(None),
+            )
+        )
+    )
 
 
 # --- Impact analysis ------------------------------------------------------------------------

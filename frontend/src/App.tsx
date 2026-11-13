@@ -8,6 +8,7 @@ import { Button } from "./components/ui/button";
 import { TooltipProvider } from "./components/ui/tooltip";
 import Home from "./pages/Home";
 import ModelEditor from "./pages/ModelEditor";
+import NewModelWizard from "./pages/NewModelWizard";
 import ProjectPage from "./pages/ProjectPage";
 
 export default function App() {
@@ -45,6 +46,11 @@ export default function App() {
       <Toaster theme="dark" richColors position="bottom-right" />
       <Switch>
         <Route path="/t/:tenantId/p/:projectId/m/:modelId" component={ModelEditor} />
+        <Route path="/t/:tenantId/p/:projectId/new-model">
+          <Shell>
+            <NewModelWizard />
+          </Shell>
+        </Route>
         <Route path="/t/:tenantId/p/:projectId">
           <Shell>
             <ProjectPage />

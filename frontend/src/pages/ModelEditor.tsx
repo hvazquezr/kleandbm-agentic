@@ -2,6 +2,7 @@ import { ArrowLeft, Eye, LayoutGrid, Plus } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "wouter";
+import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import type { Schemas } from "@/api/client";
 import { useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
 import ModelCanvas, { type ModelCanvasHandle } from "@/components/canvas/ModelCanvas";
@@ -37,7 +38,7 @@ export default function ModelEditor() {
   const canvas = useRef<ModelCanvasHandle>(null);
 
   const [selection, setSelection] = useState<Selection>(null);
-  const [tab, setTab] = useState("inspect");
+  const [tab, setTab] = useState("assistant");
   const [connecting, setConnecting] = useState<{ from: string; to: string } | null>(null);
   const [addingTable, setAddingTable] = useState(false);
   const [localLayout, setLocalLayout] = useState<Positions>({});
@@ -143,14 +144,25 @@ export default function ModelEditor() {
           )}
         </div>
 
-        <aside className="w-[400px] border-l flex flex-col min-h-0">
+        <aside className="w-[440px] border-l flex flex-col min-h-0">
           <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0 gap-0">
             <TabsList className="m-2">
+              <TabsTrigger value="assistant">Assistant</TabsTrigger>
               <TabsTrigger value="inspect">Inspector</TabsTrigger>
               <TabsTrigger value="registers">Registers</TabsTrigger>
               <TabsTrigger value="versions">Versions</TabsTrigger>
             </TabsList>
-            <ScrollArea className="flex-1 min-h-0">
+            {/* The assistant scrolls its own transcript and keeps its composer pinned. */}
+            <TabsContent value="assistant" className="flex-1 min-h-0 flex flex-col px-4 pb-4">
+              <AssistantPanel
+                path={path}
+                modelId={modelId}
+                canEdit={canEdit}
+                className="flex-1"
+                onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }}
+              />
+            </TabsContent>
+            <ScrollArea className={tab === "assistant" ? "hidden" : "flex-1 min-h-0"}>
               <div className="p-4">
                 <TabsContent value="inspect" className="space-y-6">
                   {!selection && <p className="text-sm text-muted-foreground">Select a table or relationship. Drag from a table's bottom handle to another table to relate them.</p>}
@@ -182,7 +194,8 @@ export default function ModelEditor() {
                   {selection?.kind === "record" && <RecordActivity path={path} recordId={selection.id} describe={describe} />}
                 </TabsContent>
                 <TabsContent value="registers">
-                  <RegistersPanel snapshot={snap} onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }} />
+                  <RegistersPanel snapshot={snap} canApprove={canApprove && viewingSeq === undefined} write={write}
+                    onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }} />
                 </TabsContent>
                 <TabsContent value="versions">
                   <VersionsPanel path={path} modelId={modelId} snapshot={snap} canEdit={canEdit} canApprove={canApprove}

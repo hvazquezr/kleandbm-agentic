@@ -109,6 +109,23 @@ export interface paths {
         patch: operations["update_project_tenants__tenant_id__projects__project_id__patch"];
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_tenants__tenant_id__projects__project_id__agent_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/changesets": {
         parameters: {
             query?: never;
@@ -120,6 +137,42 @@ export interface paths {
         put?: never;
         /** Apply Changeset */
         post: operations["apply_changeset_tenants__tenant_id__projects__project_id__changesets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Conversations */
+        get: operations["list_conversations_tenants__tenant_id__projects__project_id__conversations_get"];
+        put?: never;
+        /** Create Conversation */
+        post: operations["create_conversation_tenants__tenant_id__projects__project_id__conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/conversations/{conversation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Messages */
+        get: operations["list_messages_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_get"];
+        put?: never;
+        /** Send Message */
+        post: operations["send_message_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -614,6 +667,37 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** ConversationIn */
+        ConversationIn: {
+            /**
+             * Agent
+             * @default business_requirements
+             */
+            agent: string;
+            /** Model Id */
+            model_id?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** ConversationOut */
+        ConversationOut: {
+            /** Agent */
+            agent: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Model Id */
+            model_id: string | null;
+            /** Title */
+            title: string;
+        };
         /** CreateOp */
         CreateOp: {
             /** Data */
@@ -857,6 +941,43 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /** MessageIn */
+        MessageIn: {
+            /** Attachment Version Ids */
+            attachment_version_ids?: string[];
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** MessageOut */
+        MessageOut: {
+            /** Activity */
+            activity: {
+                [key: string]: unknown;
+            }[];
+            /** Attachments */
+            attachments: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Role */
+            role: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Text */
+            text: string;
         };
         /**
          * MetricDetails
@@ -1221,6 +1342,43 @@ export interface components {
             origin_ref?: string | null;
             /** Statement */
             statement: string;
+        };
+        /** RunOut */
+        RunOut: {
+            /** Agent */
+            agent: string;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Changeset Seqs */
+            changeset_seqs: number[];
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Iterations */
+            iterations: number;
+            /** Llm Model */
+            llm_model: string;
+            /** Output Tokens */
+            output_tokens: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Status Detail */
+            status_detail: string | null;
+            /** Tool Calls */
+            tool_calls: number;
         };
         /**
          * ScdType
@@ -1755,6 +1913,39 @@ export interface operations {
             };
         };
     };
+    get_run_tenants__tenant_id__projects__project_id__agent_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     apply_changeset_tenants__tenant_id__projects__project_id__changesets_post: {
         parameters: {
             query?: never;
@@ -1779,6 +1970,144 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ChangesetOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_tenants__tenant_id__projects__project_id__conversations_get: {
+        parameters: {
+            query?: {
+                model_id?: string | null;
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_conversation_tenants__tenant_id__projects__project_id__conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_message_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

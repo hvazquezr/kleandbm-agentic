@@ -28,6 +28,8 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Live provider tests cost money; run them explicitly with: pytest -m live_llm
+addopts = "-m 'not live_llm'"
 markers = [
     "live_llm: calls a real model provider (opt-in, not run by default)",
 ]

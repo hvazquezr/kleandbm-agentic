@@ -27,7 +27,7 @@ from app.api.auth import TokenVerifier
 from app.config import get_settings
 from app.main import create_app
 from app.persistence.db import get_session
-from app.persistence import documents as _document_tables, modeling as _modeling_tables, sources as _source_tables  # noqa: F401  (registers tables)
+from app.persistence import conversations as _conversation_tables, documents as _document_tables, modeling as _modeling_tables, sources as _source_tables  # noqa: F401  (registers tables)
 from app.persistence.models import Base
 
 ISSUER = "https://test-issuer.example/"
@@ -110,7 +110,12 @@ def object_store(tmp_path) -> LocalObjectStore:
 
 @pytest.fixture
 def client(db_session_factory, verifier, object_store) -> Iterator[TestClient]:
-    app = create_app(token_verifier=verifier, object_store=object_store, embedder=FakeEmbedder(1536))
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    app = create_app(
+        token_verifier=verifier, object_store=object_store, embedder=FakeEmbedder(1536),
+        session_factory=db_session_factory, agent_checkpointer=InMemorySaver(),
+    )
 
     def _session() -> Iterator[Session]:
         session = db_session_factory()

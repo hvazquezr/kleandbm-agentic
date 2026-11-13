@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine
 
 from app.config import get_settings
-from app.persistence import documents, modeling, sources  # noqa: F401  (registers tables on Base.metadata)
+from app.persistence import conversations, documents, modeling, sources  # noqa: F401  (registers tables on Base.metadata)
 from app.persistence.models import Base
 
 config = context.config
@@ -36,8 +36,19 @@ def run_migrations_online() -> None:
     engine.dispose()
 
 
+# LangGraph's Postgres checkpointer owns these tables; Alembic must not manage them.
+LANGGRAPH_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+
+
+def _include_object(obj, name, type_, reflected, compare_to) -> bool:
+    return not (type_ == "table" and name in LANGGRAPH_TABLES)
+
+
 def _run(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, compare_type=True,
+        include_object=_include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -1,4 +1,6 @@
-import type { Snapshot } from "@/api/client";
+import { Check, X } from "lucide-react";
+import type { Operation, Snapshot } from "@/api/client";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { humanize } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -38,23 +40,63 @@ function Section({ title, count, children }: { title: string; count: number; chi
   );
 }
 
-function Item({ code, children, onClick }: { code: string | null; children: React.ReactNode; onClick?: () => void }) {
+function Item({
+  code,
+  children,
+  onClick,
+  actions,
+}: {
+  code: string | null;
+  children: React.ReactNode;
+  onClick?: () => void;
+  actions?: React.ReactNode;
+}) {
   return (
-    <li>
-      <button type="button" onClick={onClick} className="w-full text-left rounded-md border p-2.5 text-sm space-y-1.5 hover:bg-accent/50">
+    <li className="rounded-md border hover:bg-accent/30">
+      <button type="button" onClick={onClick} className="w-full text-left p-2.5 pb-1.5 text-sm space-y-1.5">
         <div className="text-xs font-mono text-muted-foreground">{code}</div>
         {children}
       </button>
+      {actions && <div className="flex gap-1.5 px-2.5 pb-2">{actions}</div>}
     </li>
   );
 }
 
-export function RegistersPanel({ snapshot, onSelectRecord }: { snapshot: Snapshot; onSelectRecord: (id: string) => void }) {
+type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
+
+/** Confirm or reject a meaning. Only people with approval rights get these; agents never can. */
+function Decide({ id, seq, code, write }: { id: string; seq: number; code: string | null; write: Write }) {
+  const decide = (status: "confirmed" | "rejected") =>
+    write([{ op: "update", id, expected_seq: seq, data: { confirmation_status: status } }],
+      { success: `${code} ${status}`, reason: `${status === "confirmed" ? "Confirmed" : "Rejected"} by a person` });
+  return (
+    <>
+      <Button size="sm" variant="outline" className="h-7" onClick={() => decide("confirmed")}><Check className="size-3.5" /> Confirm</Button>
+      <Button size="sm" variant="ghost" className="h-7 text-muted-foreground" onClick={() => decide("rejected")}><X className="size-3.5" /> Reject</Button>
+    </>
+  );
+}
+
+export function RegistersPanel({
+  snapshot,
+  onSelectRecord,
+  canApprove = false,
+  write,
+}: {
+  snapshot: Snapshot;
+  onSelectRecord: (id: string) => void;
+  canApprove?: boolean;
+  write?: Write;
+}) {
+  const decide = (r: { id: string; seq: number; code: string | null; data: { confirmation_status?: string } }) =>
+    canApprove && write && (r.data.confirmation_status ?? "unconfirmed") === "unconfirmed"
+      ? <Decide id={r.id} seq={r.seq} code={r.code} write={write} />
+      : undefined;
   return (
     <div className="space-y-6">
       <Section title="Requirements" count={snapshot.requirements.length}>
         {snapshot.requirements.map((r) => (
-          <Item key={r.id} code={r.code} onClick={() => onSelectRecord(r.id)}>
+          <Item key={r.id} code={r.code} onClick={() => onSelectRecord(r.id)} actions={decide(r)}>
             <div>{r.data.statement}</div>
             <div className="flex flex-wrap gap-1.5">
               <Status value={r.data.confirmation_status} />
@@ -70,7 +112,7 @@ export function RegistersPanel({ snapshot, onSelectRecord }: { snapshot: Snapsho
 
       <Section title="Business definitions" count={snapshot.definitions.length}>
         {snapshot.definitions.map((d) => (
-          <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)}>
+          <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)} actions={decide(d)}>
             <div className="font-medium">{d.data.term} <span className="text-xs text-muted-foreground">({humanize(d.data.kind)})</span></div>
             {d.data.definition ? <div className="text-muted-foreground">{d.data.definition}</div>
               : <div className="text-amber-500 text-xs">Meaning not yet defined</div>}

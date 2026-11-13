@@ -188,3 +188,87 @@ export function useImpact(path: ProjectPath, recordId: string | null) {
       ),
   });
 }
+
+// --- Conversations, documents, sources ----------------------------------------------------
+
+export function useConversations(path: ProjectPath, modelId: string | undefined) {
+  return useQuery({
+    queryKey: ["conversations", path.project_id, modelId ?? "project"],
+    queryFn: () =>
+      unwrap(
+        api.GET("/tenants/{tenant_id}/projects/{project_id}/conversations", {
+          params: { path, query: modelId ? { model_id: modelId } : {} },
+        }),
+      ),
+  });
+}
+
+export function useCreateConversation(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { model_id?: string; title?: string }) =>
+      unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/conversations", { params: { path }, body: { agent: "business_requirements", ...body } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", path.project_id] }),
+  });
+}
+
+export function useMessages(path: ProjectPath, conversationId: string | undefined) {
+  return useQuery({
+    queryKey: ["messages", path.project_id, conversationId ?? ""],
+    enabled: !!conversationId,
+    queryFn: () =>
+      unwrap(
+        api.GET("/tenants/{tenant_id}/projects/{project_id}/conversations/{conversation_id}/messages", {
+          params: { path: { ...path, conversation_id: conversationId! } },
+        }),
+      ),
+  });
+}
+
+export function useDocuments(path: ProjectPath) {
+  return useQuery({
+    queryKey: ["documents", path.project_id],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/documents", { params: { path } })),
+  });
+}
+
+export function useSources(path: ProjectPath) {
+  return useQuery({
+    queryKey: ["sources", path.project_id],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/sources", { params: { path } })),
+  });
+}
+
+export function useCreateSource(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; host: string; port: number; database: string; username: string; password: string }) =>
+      unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/sources", { params: { path }, body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", path.project_id] }),
+  });
+}
+
+export function useCallSourceTool(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { connectionId: string; tool: string; arguments?: Record<string, unknown>; purpose?: string }) =>
+      unwrap(
+        api.POST("/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/tools/{tool}", {
+          params: { path: { ...path, connection_id: args.connectionId, tool: args.tool } },
+          body: { arguments: args.arguments ?? {}, purpose: args.purpose },
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", path.project_id] }),
+  });
+}
+
+/** After an agent turn, everything it may have written needs refetching. */
+export function useInvalidateAfterAgent(path: ProjectPath) {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all(
+      ["snapshot", "messages", "documents", "history", "impact", "versions"].map((k) =>
+        qc.invalidateQueries({ queryKey: [k, path.project_id] }),
+      ),
+    );
+}

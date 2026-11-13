@@ -28,6 +28,11 @@ const auth: Middleware = {
 };
 
 export const api = createClient<paths>({ baseUrl: "/api" });
+
+/** Authorization headers for requests made outside the typed client (uploads, streams). */
+export async function authHeaders(): Promise<Record<string, string>> {
+  return tokenGetter ? { Authorization: `Bearer ${await tokenGetter()}` } : {};
+}
 api.use(auth);
 
 /** Thrown for any non-2xx response so React Query sees a failure. */

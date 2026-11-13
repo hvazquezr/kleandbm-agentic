@@ -1,0 +1,176 @@
+"""Conversations with agents. Sending a message streams the agent's reply as Server-Sent
+Events:
+
+  data: {"type": "run", "run_id": ...}
+  data: {"type": "text", "text": "..."}                       (incremental reply text)
+  data: {"type": "tool", "status": "started|ok|error", "name": ..., "summary": ..., "record": ...}
+  data: {"type": "done", "status": ..., "message_id": ..., "run": {usage...}}
+"""
+
+import json
+import queue
+import threading
+import traceback
+import uuid
+from collections.abc import Iterator
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from app.adapters.llm import LLMError
+from app.agents.requirements.agent import run_turn
+from app.api.deps import ProjectScopeDep, SessionDep
+from app.config import get_settings
+from app.persistence.conversations import AgentRun, RunStatus
+from app.domain import conversations
+
+def _mark_failed(session_factory, run_id: uuid.UUID, detail: str) -> None:
+    """Never leave a run 'running': that would block the conversation for good."""
+    from datetime import UTC, datetime
+
+    with session_factory() as session:
+        run = session.get(AgentRun, run_id)
+        if run is not None and run.status is RunStatus.RUNNING:
+            run.status, run.status_detail, run.finished_at = RunStatus.FAILED, detail, datetime.now(UTC)
+            session.commit()
+
+
+def _checkpointer(app_state):
+    holder = app_state.agent_checkpointer
+    # A lazy holder opens Postgres on first use; anything else is a ready checkpointer (or None).
+    return holder.resolve() if hasattr(holder, "resolve") else holder
+
+
+router = APIRouter(prefix="/tenants/{tenant_id}/projects/{project_id}", tags=["conversations"])
+
+
+class ConversationIn(BaseModel):
+    model_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=255)
+    agent: str = "business_requirements"
+
+
+class ConversationOut(BaseModel):
+    id: uuid.UUID
+    model_id: uuid.UUID | None
+    agent: str
+    title: str
+    created_at: datetime
+
+
+class MessageIn(BaseModel):
+    text: str = Field(default="", max_length=20_000)
+    attachment_version_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+
+
+class MessageOut(BaseModel):
+    id: uuid.UUID
+    ordinal: int
+    role: str
+    text: str
+    attachments: list[str]
+    activity: list[dict[str, Any]]
+    run_id: uuid.UUID | None
+    created_at: datetime
+
+
+class RunOut(BaseModel):
+    id: uuid.UUID
+    agent: str
+    llm_model: str
+    status: str
+    status_detail: str | None
+    iterations: int
+    tool_calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    changeset_seqs: list[int]
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@router.post("/conversations", status_code=status.HTTP_201_CREATED)
+def create_conversation(body: ConversationIn, session: SessionDep, scope: ProjectScopeDep) -> ConversationOut:
+    c = conversations.create_conversation(session, scope, agent=body.agent, model_id=body.model_id, title=body.title)
+    return ConversationOut(id=c.id, model_id=c.model_id, agent=c.agent, title=c.title, created_at=c.created_at)
+
+
+@router.get("/conversations")
+def list_conversations(session: SessionDep, scope: ProjectScopeDep, model_id: uuid.UUID | None = None) -> list[ConversationOut]:
+    return [ConversationOut(id=c.id, model_id=c.model_id, agent=c.agent, title=c.title, created_at=c.created_at)
+            for c in conversations.list_conversations(session, scope, model_id)]
+
+
+@router.get("/conversations/{conversation_id}/messages")
+def list_messages(conversation_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[MessageOut]:
+    return [
+        MessageOut(id=m.id, ordinal=m.ordinal, role=str(m.role), text=m.text, attachments=list(m.attachments or []),
+                   activity=list(m.activity or []), run_id=m.run_id, created_at=m.created_at)
+        for m in conversations.list_messages(session, scope, conversation_id)
+    ]
+
+
+@router.get("/agent-runs/{run_id}")
+def get_run(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> RunOut:
+    r = conversations.get_run(session, scope, run_id)
+    return RunOut(
+        id=r.id, agent=r.agent, llm_model=r.llm_model, status=str(r.status), status_detail=r.status_detail,
+        iterations=r.iterations, tool_calls=r.tool_calls, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
+        cache_read_tokens=r.cache_read_tokens, cache_write_tokens=r.cache_write_tokens,
+        changeset_seqs=list(r.changeset_seqs or []), started_at=r.started_at, finished_at=r.finished_at,
+    )
+
+
+@router.post("/conversations/{conversation_id}/messages", response_class=StreamingResponse)
+def send_message(
+    conversation_id: uuid.UUID, body: MessageIn, request: Request, session: SessionDep, scope: ProjectScopeDep
+) -> StreamingResponse:
+    settings = get_settings()
+    # Build the model before storing anything, so a missing key fails the request cleanly.
+    try:
+        chat_model = request.app.state.chat_model_factory()
+    except LLMError as exc:
+        from app.domain.tenancy import InvalidOperation
+
+        raise InvalidOperation(str(exc)) from exc
+    run = conversations.start_turn(
+        session, scope, conversation_id, text=body.text,
+        attachment_version_ids=body.attachment_version_ids, llm_model=chat_model.model,
+    )
+    session.commit()  # the run and user message must exist before the worker reads them
+
+    events: queue.Queue = queue.Queue()
+    app_state = request.app.state
+    tenant_id, project_id, run_id = scope.tenant_id, scope.project_id, run.id
+
+    def worker() -> None:
+        try:
+            run_turn(
+                app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
+                chat_model=chat_model, embedder=app_state.embedder, max_iterations=settings.agent_max_iterations,
+                emit=events.put, checkpointer=_checkpointer(app_state),
+            )
+        except Exception as exc:  # run_turn records its own outcomes; this catches setup failures
+            traceback.print_exc()
+            _mark_failed(app_state.session_factory, run_id, f"the agent could not start ({type(exc).__name__})")
+            events.put({"type": "done", "status": "failed", "detail": "the agent could not start",
+                        "message_id": None, "run": {"id": str(run_id)}})
+        finally:
+            events.put(None)
+
+    # The agent runs in its own thread with its own session, independent of this request's
+    # session, so it finishes and records its outcome even if the browser disconnects.
+    threading.Thread(target=worker, name=f"agent-run-{run_id}", daemon=True).start()
+
+    def stream() -> Iterator[str]:
+        yield f"data: {json.dumps({'type': 'run', 'run_id': str(run_id)})}\n\n"
+        while (event := events.get()) is not None:
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

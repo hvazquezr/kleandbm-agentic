@@ -1,18 +1,65 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.adapters.embeddings import Embedder, embedder_from_settings
+from app.adapters.llm import AnthropicChatModel, ChatModel, LLMError, ScriptedChatModel
 from app.adapters.sources import SourceConnector, StdioMySqlConnector
 from app.adapters.storage import ObjectStore, store_from_settings
 from app.api.auth import TokenVerifier, verifier_from_settings
+from app.api.conversation_routes import router as conversation_router
 from app.api.document_routes import router as document_router
 from app.api.source_routes import router as source_router
 from app.api.modeling_routes import router as modeling_router
 from app.api.routes import router
 from app.config import get_settings
+from app.persistence.db import _session_factory
 from app.domain.access import AccessDenied, NotFoundInScope
 from app.domain.modeling import StaleUpdate
 from app.domain.tenancy import InvalidOperation
+
+
+def _chat_model_from_settings(settings) -> ChatModel:
+    if settings.requirements_agent_provider == "anthropic":
+        return AnthropicChatModel(
+            settings.anthropic_api_key, settings.requirements_agent_model,
+            settings.requirements_agent_effort, settings.agent_max_tokens,
+        )
+    if settings.requirements_agent_provider == "fake":
+        return ScriptedChatModel([{"text": "The fake model is configured; set KLEANDBM_REQUIREMENTS_AGENT_PROVIDER=anthropic."}])
+    raise LLMError(f"unknown agent provider {settings.requirements_agent_provider!r}")
+
+
+class _LazyCheckpointer:
+    """Opens the Postgres checkpointer on first use, so importing the app never touches the
+    database. Checkpoint tables are created by LangGraph and kept apart from the registers."""
+
+    def __init__(self, settings) -> None:
+        self._settings = settings
+        self._saver = None
+        self._pool = None
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+            self._pool, self._saver = None, None
+
+    def resolve(self):
+        if not self._settings.agent_checkpoints:
+            return None
+        if self._saver is None:
+            from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+
+            url = self._settings.database_url.replace("postgresql+psycopg://", "postgresql://")
+            pool = ConnectionPool(url, max_size=5, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+            self._pool = pool
+            saver = PostgresSaver(pool)
+            saver.setup()
+            self._saver = saver
+        return self._saver
 
 
 def create_app(
@@ -20,13 +67,27 @@ def create_app(
     object_store: ObjectStore | None = None,
     embedder: Embedder | None = None,
     source_connector: SourceConnector | None = None,
+    chat_model_factory=None,
+    session_factory=None,
+    agent_checkpointer=None,
 ) -> FastAPI:
-    app = FastAPI(title="KleanDBM API", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        holder = app.state.agent_checkpointer
+        if hasattr(holder, "close"):
+            holder.close()
+
+    app = FastAPI(title="KleanDBM API", version="0.1.0", lifespan=lifespan)
     settings = get_settings()
 
     # Tests inject their own adapters; otherwise they come from settings.
     app.state.object_store = object_store or store_from_settings(settings)
     app.state.embedder = embedder or embedder_from_settings(settings)
+    # Agents run in worker threads with their own sessions, so they need a factory, not a session.
+    app.state.session_factory = session_factory or _session_factory()
+    app.state.chat_model_factory = chat_model_factory or (lambda: _chat_model_from_settings(settings))
+    app.state.agent_checkpointer = agent_checkpointer if agent_checkpointer is not None else _LazyCheckpointer(settings)
     app.state.source_connector = source_connector or StdioMySqlConnector(
         settings.mcp_dir, settings.source_query_timeout_ms, settings.source_call_timeout_s,
         settings.source_max_result_bytes,
@@ -73,6 +134,7 @@ def create_app(
     app.include_router(modeling_router)
     app.include_router(document_router)
     app.include_router(source_router)
+    app.include_router(conversation_router)
     return app
 
 
