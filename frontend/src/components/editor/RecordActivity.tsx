@@ -4,7 +4,16 @@ import { Badge } from "@/components/ui/badge";
 import { humanize } from "@/lib/labels";
 
 /** Change history and impact for one record. */
-export function RecordActivity({ path, recordId }: { path: ProjectPath; recordId: string }) {
+export function RecordActivity({
+  path,
+  recordId,
+  describe,
+}: {
+  path: ProjectPath;
+  recordId: string;
+  /** Optional label for records with no name of their own, such as relationships. */
+  describe?: (id: string) => string | undefined;
+}) {
   const history = useHistory(path, recordId);
   const impact = useImpact(path, recordId);
 
@@ -17,8 +26,8 @@ export function RecordActivity({ path, recordId }: { path: ProjectPath; recordId
           {impact.data?.map((e) => (
             <li key={e.record.id} className="text-sm flex items-center gap-2">
               <Badge variant="outline" className="font-normal">{e.record.type}</Badge>
-              <span className="truncate">{label(e.record)}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{humanize(e.via)} · {e.depth} hop{e.depth > 1 ? "s" : ""}</span>
+              <span className="truncate min-w-0" title={describe?.(e.record.id) ?? label(e.record)}>{describe?.(e.record.id) ?? label(e.record)}</span>
+              <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">{humanize(e.via)} · {e.depth} hop{e.depth > 1 ? "s" : ""}</span>
             </li>
           ))}
         </ul>

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CARDINALITIES } from "@/lib/labels";
 import { EnumSelect, Field } from "./fields";
+import { useConfirm } from "./useConfirm";
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
 
@@ -25,6 +26,7 @@ export function RelationshipInspector({
   onDeleted: () => void;
 }) {
   const d = relationship.data;
+  const [ask, confirmDialog] = useConfirm();
   const [cardinality, setCardinality] = useState(d.cardinality ?? "many_to_one");
   const [roleName, setRoleName] = useState(d.role_name ?? "");
   const [description, setDescription] = useState(d.description ?? "");
@@ -45,6 +47,7 @@ export function RelationshipInspector({
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       <div className="rounded-md border p-3 text-sm space-y-1">
         <div><span className="text-muted-foreground">From </span>{end(d.from_table_id, d.from_attribute_id)}</div>
         <div><span className="text-muted-foreground">To </span>{end(d.to_table_id, d.to_attribute_id)}</div>
@@ -69,7 +72,13 @@ export function RelationshipInspector({
           </Button>
           <Button size="sm" variant="ghost" className="ml-auto text-destructive"
             onClick={async () => {
-              if (!confirm("Delete this relationship? The foreign key attribute is kept.")) return;
+              const ok = await ask({
+                title: "Delete this relationship?",
+                description: "The foreign key attribute is kept; delete it separately if it's no longer needed.",
+                confirmLabel: "Delete relationship",
+                destructive: true,
+              });
+              if (ok === null) return;
               if (await write([{ op: "delete", id: relationship.id, expected_seq: relationship.seq }], { success: "Relationship deleted" })) onDeleted();
             }}>
             <Trash2 className="size-4" /> Delete

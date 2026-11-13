@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIVITY, ATTRIBUTE_ROLES, LOGICAL_TYPES, SCD_TYPES, TABLE_KINDS } from "@/lib/labels";
 import { EnumSelect, Field } from "./fields";
+import { useConfirm } from "./useConfirm";
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
 type TableData = Schemas["TableData"];
@@ -34,6 +35,7 @@ export function TableInspector({
   onDeleted: () => void;
 }) {
   const [form, setForm] = useState<TableData>(table.data);
+  const [ask, confirmDialog] = useConfirm();
   // Reset the form whenever a new revision of the table arrives.
   useEffect(() => setForm(table.data), [table.id, table.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -45,12 +47,19 @@ export function TableInspector({
     write([{ op: "update", id: table.id, expected_seq: table.seq, data: patch }], { success: "Table saved" });
 
   const remove = async () => {
-    if (!confirm(`Delete ${table.data.name}? Its attributes and relationships are deleted too.`)) return;
+    const ok = await ask({
+      title: `Delete ${table.data.name}?`,
+      description: "Its attributes and relationships are deleted too. The history keeps every earlier version.",
+      confirmLabel: "Delete table",
+      destructive: true,
+    });
+    if (ok === null) return;
     if (await write([{ op: "delete", id: table.id, expected_seq: table.seq }], { success: "Table deleted" })) onDeleted();
   };
 
   return (
     <div className="space-y-5">
+      {confirmDialog}
       <section className="space-y-3">
         <Field label="Name">
           <Input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} className="h-8" />
@@ -131,12 +140,14 @@ function AttributeFields({ value, onChange, readOnly }: { value: AttributeData; 
 function AttributeRow({ attribute, readOnly, write }: { attribute: AttributeRecord; readOnly: boolean; write: Write }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<AttributeData>(attribute.data);
+  const [ask, confirmDialog] = useConfirm();
   useEffect(() => setForm(attribute.data), [attribute.id, attribute.seq]); // eslint-disable-line react-hooks/exhaustive-deps
   const patch = diff(attribute.data, form);
   const dirty = Object.keys(patch).length > 0;
 
   return (
     <div className="rounded-md border">
+      {confirmDialog}
       <button type="button" className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         <span className="font-medium flex-1 truncate">{attribute.data.name}</span>
@@ -152,8 +163,15 @@ function AttributeRow({ attribute, readOnly, write }: { attribute: AttributeReco
                 Save
               </Button>
               <Button size="sm" variant="ghost" className="ml-auto text-destructive"
-                onClick={() => confirm(`Delete ${attribute.data.name}?`) &&
-                  write([{ op: "delete", id: attribute.id, expected_seq: attribute.seq }], { success: "Attribute deleted" })}>
+                onClick={async () => {
+                  const ok = await ask({
+                    title: `Delete ${attribute.data.name}?`,
+                    description: "Relationships that use this attribute are deleted too.",
+                    confirmLabel: "Delete attribute",
+                    destructive: true,
+                  });
+                  if (ok !== null) write([{ op: "delete", id: attribute.id, expected_seq: attribute.seq }], { success: "Attribute deleted" });
+                }}>
                 <Trash2 className="size-4" />
               </Button>
             </div>

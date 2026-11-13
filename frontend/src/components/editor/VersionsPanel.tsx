@@ -6,6 +6,7 @@ import { useCreateVersion, useSetState, useVersions, type ProjectPath } from "@/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { STATE_LABELS } from "@/lib/labels";
+import { useConfirm } from "./useConfirm";
 
 export function VersionsPanel({
   path,
@@ -28,10 +29,24 @@ export function VersionsPanel({
   const createVersion = useCreateVersion(path, modelId);
   const setState = useSetState(path, modelId);
   const [name, setName] = useState("");
+  const [ask, confirmDialog] = useConfirm();
   const state = snapshot.state;
+  // State changes and new versions always apply to the latest seq, so they're hidden while
+  // an older version is on screen. Otherwise you could accept something you aren't looking at.
+  const viewingPast = viewingSeq !== undefined;
 
   const transition = async (next: ModelState) => {
-    const note = next === "accepted" ? prompt("Acceptance note (optional)") ?? undefined : undefined;
+    let note: string | undefined;
+    if (next === "accepted") {
+      const entered = await ask({
+        title: `Accept the model at seq ${snapshot.current_seq}?`,
+        description: "Acceptance is recorded against this version. Any later change returns the model to Draft.",
+        inputLabel: "Acceptance note (optional)",
+        confirmLabel: "Accept",
+      });
+      if (entered === null) return;
+      note = entered.trim() || undefined;
+    }
     try {
       await setState.mutateAsync({ state: next, note });
       toast.success(`Model marked ${STATE_LABELS[next]}`);
@@ -42,6 +57,7 @@ export function VersionsPanel({
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">Lifecycle</h3>
         <div className="text-sm">
@@ -52,7 +68,10 @@ export function VersionsPanel({
             </p>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        {viewingPast && (
+          <p className="text-xs text-muted-foreground">You're viewing seq {viewingSeq}. Return to the latest version to change state or save a version.</p>
+        )}
+        <div className={viewingPast ? "hidden" : "flex flex-wrap gap-2"}>
           {canEdit && state.effective_state === "draft" && snapshot.current_seq > 0 && (
             <Button size="sm" variant="outline" onClick={() => transition("ready_for_review")}>
               <Send className="size-4" /> Ready for review
@@ -68,7 +87,7 @@ export function VersionsPanel({
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">Named versions</h3>
-        {canEdit && (
+        {canEdit && !viewingPast && (
           <form className="flex gap-2" onSubmit={async (e) => {
             e.preventDefault();
             try {

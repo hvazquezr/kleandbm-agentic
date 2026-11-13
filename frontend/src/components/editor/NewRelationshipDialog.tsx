@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CARDINALITIES } from "@/lib/labels";
+import { suggestForeignKeyName } from "@/lib/naming";
 import { EnumSelect, Field } from "./fields";
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
@@ -51,9 +52,7 @@ export function NewRelationshipDialog({
   const targetKey = toAttrs.find((a) => a.id === toAttrId);
   useEffect(() => {
     // Suggest an FK name from the role and target key, e.g. "order_date_key".
-    const base = targetKey?.data.name ?? "";
-    const slug = roleName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    setNewFkName(slug && base && !base.startsWith(slug) ? `${slug}_${base}` : base);
+    setNewFkName(suggestForeignKeyName(roleName, targetKey?.data.name ?? ""));
   }, [targetKey?.data.name, roleName]);
 
   const canCreate = !!targetKey && (fromAttrId !== NEW_FK || newFkName.trim().length > 0);

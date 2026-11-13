@@ -11,7 +11,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { AttributeRecord, RelationshipRecord, TableRecord } from "@/api/client";
 import { computeAutoLayout, type Positions } from "./autoLayout";
 import RelationshipEdge, { type RelationshipFlowEdge } from "./RelationshipEdge";
@@ -24,6 +24,8 @@ export type ModelCanvasHandle = {
   /** Positions for every table (saved, or auto-laid-out when none is saved). */
   autoLayout: () => Positions;
   fitView: () => void;
+  /** Flow coordinates for placing a new table in the middle of what's visible. */
+  visibleCenter: () => { x: number; y: number };
 };
 
 type Props = {
@@ -47,7 +49,8 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
     selectedTableId, selectedRelationshipId, highlightedIds,
     onSelectTable, onSelectRelationship, onMoveTable, onConnectTables,
   } = props;
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const attributesByTable = useMemo(() => {
     const map = new Map<string, AttributeRecord[]>();
@@ -113,9 +116,35 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
   useImperativeHandle(ref, () => ({
     autoLayout: () => fallbackLayout,
     fitView: () => fitView({ duration: 400, padding: 0.15 }),
-  }), [fallbackLayout, fitView]);
+    visibleCenter: () => {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return { x: 0, y: 0 };
+      const c = screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      // Start with the new node's middle at the centre, then step outward on a grid until it
+      // doesn't overlap an existing table.
+      const W = 320, H = 140, GAP = 40;
+      const boxes = nodes.map((n) => ({
+        x: n.position.x, y: n.position.y,
+        w: n.measured?.width ?? W, h: n.measured?.height ?? H,
+      }));
+      const free = (x: number, y: number) =>
+        boxes.every((b) => x + W + GAP <= b.x || b.x + b.w + GAP <= x || y + H + GAP <= b.y || b.y + b.h + GAP <= y);
+      const start = { x: c.x - W / 2, y: c.y - H / 2 };
+      for (let ring = 0; ring <= 6; ring++) {
+        for (let dx = -ring; dx <= ring; dx++) {
+          for (let dy = -ring; dy <= ring; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // only the ring's edge
+            const x = start.x + dx * (W + GAP), y = start.y + dy * (H + GAP);
+            if (free(x, y)) return { x, y };
+          }
+        }
+      }
+      return start;
+    },
+  }), [fallbackLayout, fitView, screenToFlowPosition, nodes]);
 
   return (
+    <div ref={containerRef} className="size-full">
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -137,6 +166,7 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
       <Controls showInteractive={false} />
       <MiniMap pannable zoomable />
     </ReactFlow>
+    </div>
   );
 });
 

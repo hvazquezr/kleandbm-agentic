@@ -78,6 +78,14 @@ export default function ModelEditor() {
   if (!snap) return <div className="p-8 text-muted-foreground">Loading…</div>;
 
   const model = models.data?.find((m) => m.id === modelId);
+  // Relationships have no name, so describe them by their ends for the impact list.
+  const describe = (id: string) => {
+    const rel = snap.relationships.find((r) => r.id === id);
+    if (!rel) return undefined;
+    const from = tables.get(rel.data.from_table_id)?.data.name ?? "?";
+    const to = tables.get(rel.data.to_table_id)?.data.name ?? "?";
+    return `${from} → ${to}${rel.data.role_name ? ` (${rel.data.role_name})` : ""}`;
+  };
   const selectedTable = selection?.kind === "table" ? tables.get(selection.id) : undefined;
   const selectedRel = selection?.kind === "relationship" ? snap.relationships.find((r) => r.id === selection.id) : undefined;
 
@@ -155,7 +163,7 @@ export default function ModelEditor() {
                         write={write}
                         onDeleted={() => setSelection(null)}
                       />
-                      <RecordActivity path={path} recordId={selectedTable.id} />
+                      <RecordActivity path={path} recordId={selectedTable.id} describe={describe} />
                     </>
                   )}
                   {selectedRel && (
@@ -168,10 +176,10 @@ export default function ModelEditor() {
                         write={write}
                         onDeleted={() => setSelection(null)}
                       />
-                      <RecordActivity path={path} recordId={selectedRel.id} />
+                      <RecordActivity path={path} recordId={selectedRel.id} describe={describe} />
                     </>
                   )}
-                  {selection?.kind === "record" && <RecordActivity path={path} recordId={selection.id} />}
+                  {selection?.kind === "record" && <RecordActivity path={path} recordId={selection.id} describe={describe} />}
                 </TabsContent>
                 <TabsContent value="registers">
                   <RegistersPanel snapshot={snap} onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }} />
@@ -203,6 +211,10 @@ export default function ModelEditor() {
             const result = await write([{ op: "create", type: "table", ref: "t", data }], { success: "Table created" });
             if (result) {
               setAddingTable(false);
+              // Put the new table where the user is looking. The first table has no canvas
+              // yet, so auto-layout places it.
+              const center = canvas.current?.visibleCenter();
+              if (center) savePositions({ [result.created.t]: center });
               onSelectTable(result.created.t);
             }
           }}
