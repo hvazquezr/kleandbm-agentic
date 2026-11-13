@@ -25,6 +25,10 @@ class ToolSpec:
     # JSON Schema for the input. Strict-compatible: additionalProperties false, every property
     # required, optional values expressed as nullable types.
     input_schema: dict[str, Any]
+    # Strict tools get schema-valid inputs guaranteed, but the provider compiles all strict
+    # schemas in a request into one grammar with a size limit. Tools with simple inputs that
+    # their handlers validate anyway can opt out.
+    strict: bool = True
 
 
 @dataclass(frozen=True)
@@ -106,7 +110,7 @@ class AnthropicChatModel:
         # strict: true guarantees schema-valid inputs. Forced tool_choice isn't available on
         # Opus 5.5, so the prompt steers tool use and tool_choice stays auto.
         return [
-            {"name": t.name, "description": t.description, "input_schema": t.input_schema, "strict": True}
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema, "strict": t.strict}
             for t in tools
         ]
 

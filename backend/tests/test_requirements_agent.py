@@ -48,7 +48,7 @@ def proj(as_user, client):
 
     def script(*steps):
         model_ = ScriptedChatModel(list(steps))
-        client.app.state.chat_model_factory = lambda: model_
+        client.app.state.chat_model_factory = lambda *_: model_
         return model_
 
     def send(user, text, attachments=()):
@@ -173,7 +173,7 @@ def test_provider_failure_is_recorded_not_raised(proj):
         def complete(self, *a, **kw):
             raise LLMError("could not reach the Anthropic API")
 
-    proj.client.app.state.chat_model_factory = lambda: Down()
+    proj.client.app.state.chat_model_factory = lambda *_: Down()
     events = sse(proj.send(proj.alice, "Hello?"))
     assert events[-1]["status"] == "failed" and "could not reach" in events[-1]["detail"]
     reply = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]
@@ -184,7 +184,7 @@ def test_provider_failure_is_recorded_not_raised(proj):
 
 
 def test_missing_api_key_fails_before_anything_is_stored(proj):
-    def no_key():
+    def no_key(*_):
         raise LLMError("KLEANDBM_ANTHROPIC_API_KEY is not set; add it to backend/.env")
 
     proj.client.app.state.chat_model_factory = no_key

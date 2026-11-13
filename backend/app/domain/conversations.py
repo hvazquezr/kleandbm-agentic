@@ -12,7 +12,7 @@ from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 
-AGENTS = {"business_requirements"}
+AGENTS = {"business_requirements": "Requirements", "architect": "Architect"}
 
 
 def _user(scope: ProjectScope) -> uuid.UUID:
@@ -25,11 +25,13 @@ def create_conversation(
     scope.require(Permission.PROJECT_EDIT)
     if agent not in AGENTS:
         raise InvalidOperation(f"unknown agent {agent!r}")
+    if agent == "architect" and model_id is None:
+        raise InvalidOperation("an Architect conversation belongs to a data model")
     if model_id is not None:
         modeling.get_model(session, scope, model_id)
     conversation = Conversation(
         tenant_id=scope.tenant_id, project_id=scope.project_id, model_id=model_id, agent=agent,
-        title=(title or "Requirements").strip()[:255], created_by=_user(scope),
+        title=(title or AGENTS[agent]).strip()[:255], created_by=_user(scope),
     )
     session.add(conversation)
     session.flush()
@@ -124,3 +126,12 @@ def get_run(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> AgentRu
     if run is None:
         raise NotFoundInScope("agent run")
     return run
+
+
+def child_runs(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> list[AgentRun]:
+    """Consultation runs started by a run, oldest first."""
+    scope.require(Permission.PROJECT_READ)
+    return list(session.scalars(
+        select(AgentRun).where(AgentRun.tenant_id == scope.tenant_id, AgentRun.project_id == scope.project_id,
+                               AgentRun.parent_run_id == run_id).order_by(AgentRun.started_at)
+    ))

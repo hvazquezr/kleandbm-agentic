@@ -589,6 +589,9 @@ class _ChangesetWriter:
         RecordType.DECISION: "status",
     }
     _HUMAN_ONLY_VALUES = {"confirmed", "rejected"}
+    # Technical assessments an agent may still revise on a confirmed entry: confirmation covers
+    # the business meaning, while feasibility depends on source evidence the Architect gathers.
+    _AGENT_ASSESSMENT_FIELDS = {RecordType.REQUIREMENT: {"feasibility_status", "feasibility_notes"}}
 
     def _guard_agent_authority(
         self, rtype: RecordType, current: dict[str, Any] | None, data: dict[str, Any]
@@ -602,7 +605,8 @@ class _ChangesetWriter:
         old = str(current.get(name)) if current else None
         if new in self._HUMAN_ONLY_VALUES and new != old:
             raise InvalidOperation(f"agents can't set {name} to {new}; only a person can")
-        if old == "confirmed" and current != data:
+        exempt = self._AGENT_ASSESSMENT_FIELDS.get(rtype, set())
+        if old == "confirmed" and any(current.get(k) != data.get(k) for k in set(current) | set(data) if k not in exempt):
             raise InvalidOperation("this entry was confirmed by a person; raise a question instead of changing it")
 
     def _create(self, op: CreateOp) -> None:

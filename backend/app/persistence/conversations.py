@@ -74,6 +74,11 @@ class AgentRun(Base):
             ["conversations.tenant_id", "conversations.project_id", "conversations.id"],
             ondelete="CASCADE", name="fk_agent_runs_conversation",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "parent_run_id"],
+            ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
+            ondelete="CASCADE", name="fk_agent_runs_parent",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -81,6 +86,9 @@ class AgentRun(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     conversation_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     agent: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Set for a subgraph run started by another agent's run (e.g. the Architect consulting the
+    # Business Requirements agent), so usage and register changes stay attributed per agent.
+    parent_run_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
     llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[RunStatus] = mapped_column(_enum(RunStatus, "run_status"), nullable=False)
     status_detail: Mapped[str | None] = mapped_column(Text)

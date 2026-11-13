@@ -126,6 +126,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Candidate */
+        get: operations["get_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Candidate
+         * @description A person applies a proposed design as one changeset. Refused (409) if the model changed since.
+         */
+        post: operations["apply_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Candidate */
+        post: operations["discard_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/changesets": {
         parameters: {
             query?: never;
@@ -333,6 +387,23 @@ export interface paths {
         put?: never;
         /** Create Model */
         post: operations["create_model_tenants__tenant_id__projects__project_id__models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Candidates */
+        get: operations["list_candidates_tenants__tenant_id__projects__project_id__models__model_id__candidates_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -675,6 +746,90 @@ export interface components {
         Body_upload_version_tenants__tenant_id__projects__project_id__documents__document_id__versions_post: {
             /** File */
             file: string;
+        };
+        /** CandidateDiff */
+        CandidateDiff: {
+            /** Added */
+            added: string[];
+            /** Changed */
+            changed: string[];
+            /** Removed */
+            removed: string[];
+        };
+        /** CandidateOut */
+        CandidateOut: {
+            /** Applied Seq */
+            applied_seq: number | null;
+            /** Base Seq */
+            base_seq: number;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            diff: components["schemas"]["CandidateDiff"] | null;
+            /** Hard Failures */
+            hard_failures: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Internal Checks */
+            internal_checks: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Model Id
+             * Format: uuid
+             */
+            model_id: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Stale */
+            stale: boolean;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: string | null;
+            /** Tables */
+            tables: number;
+        };
+        /** CandidateSummary */
+        CandidateSummary: {
+            /** Applied Seq */
+            applied_seq: number | null;
+            /** Base Seq */
+            base_seq: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Hard Failures */
+            hard_failures: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Model Id
+             * Format: uuid
+             */
+            model_id: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: string | null;
+            /** Tables */
+            tables: number;
         };
         /**
          * Cardinality
@@ -1485,6 +1640,8 @@ export interface components {
             cache_write_tokens: number;
             /** Changeset Seqs */
             changeset_seqs: number[];
+            /** Child Run Ids */
+            child_run_ids: string[];
             /** Finished At */
             finished_at: string | null;
             /**
@@ -1500,6 +1657,8 @@ export interface components {
             llm_model: string;
             /** Output Tokens */
             output_tokens: number;
+            /** Parent Run Id */
+            parent_run_id: string | null;
             /**
              * Started At
              * Format: date-time
@@ -2078,6 +2237,105 @@ export interface operations {
             };
         };
     };
+    get_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     apply_changeset_tenants__tenant_id__projects__project_id__changesets_post: {
         parameters: {
             query?: never;
@@ -2643,6 +2901,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_candidates_tenants__tenant_id__projects__project_id__models__model_id__candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateSummary"][];
                 };
             };
             /** @description Validation Error */

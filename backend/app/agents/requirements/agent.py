@@ -2,31 +2,25 @@
 
     START -> model --(tool calls)--> tools --> model ... --> END
 
-- One graph run answers one user message (one AgentRun). The graph state holds a neutral
-  transcript; LangGraph checkpoints it per run (thread_id = run id), separate from the
-  registers.
-- The execution budget (model calls per run) is enforced by the graph, not by the model.
-- Each tool call runs in its own savepoint and is committed on success, so register changes
-  appear while the agent is still working, and a failed tool rolls back cleanly.
-- Events (text deltas, tool activity) go to `emit` for streaming to the browser.
+One graph run answers one user message (one AgentRun). The graph state holds a neutral
+transcript; LangGraph checkpoints it per run (thread_id = run id), separate from the
+registers. The loop itself (budget, savepoints, streaming) is in app.agents.runtime.
 """
 
-import json
 import traceback
 import uuid
-from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import Any, TypedDict
+from typing import Any
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.embeddings import Embedder
-from app.adapters.llm import ChatModel, LLMError, Usage
+from app.adapters.llm import ChatModel, LLMError
 from app.adapters.storage import ObjectStore
 from app.agents.requirements.prompt import SYSTEM_PROMPT
-from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext, ToolInputError
+from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext
+from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, stop_outcome
 from app.domain import documents, modeling, tenancy
 from app.domain.access import Actor, ActorKind
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
@@ -35,13 +29,6 @@ from app.persistence.models import Project
 
 AGENT_NAME = "business_requirements"
 HISTORY_MESSAGES = 20
-Emit = Callable[[dict[str, Any]], None]
-
-
-class State(TypedDict):
-    transcript: list[dict[str, Any]]
-    iterations: int
-    stop: str | None
 
 
 def _context_block(session: Session, scope, conversation: Conversation, attachments: list[str]) -> str:
@@ -116,7 +103,7 @@ def run_turn(
         try:
             scope = tenancy.resolve_project_scope(session, agent, tenant_id, project_id)
         except Exception:  # membership revoked between request and run
-            _finish(session, run, None, RunStatus.FAILED, "you no longer have access to this project", emit, [])
+            finish_run(session, run, None, RunStatus.FAILED, "you no longer have access to this project", emit, [])
             return
 
         attachment_labels = []
@@ -137,80 +124,12 @@ def run_turn(
 
         ctx = ToolContext(session=session, scope=scope, embedder=embedder, store=store,
                           reason=f"Business Requirements agent run {run.id}")
-        usage = Usage()
-        activity: list[dict[str, Any]] = []
-        streamed = {"text": False}  # whether any reply text has been streamed yet this run
-
-        def on_text(chunk: str) -> None:
-            emit({"type": "text", "text": chunk})
-            streamed["text"] = True
-
-        def model_node(state: State) -> dict:
-            if state["iterations"] >= max_iterations:
-                return {"stop": "budget"}
-            if streamed["text"]:
-                emit({"type": "text", "text": "\n\n"})  # keep each step's text in its own paragraph
-                streamed["text"] = False
-            turn = chat_model.complete(SYSTEM_PROMPT, state["transcript"], TOOL_SPECS, on_text=on_text)
-            usage.add(turn.usage)
-            run.iterations = state["iterations"] + 1
-            stop = None
-            if turn.stop_reason == "refusal":
-                stop = "refusal"
-            elif turn.stop_reason == "max_tokens" and turn.tool_calls:
-                stop = "truncated"  # a cut-off tool input must not run
-            return {"transcript": [*state["transcript"], turn.to_transcript()],
-                    "iterations": state["iterations"] + 1, "stop": stop}
-
-        def tools_node(state: State) -> dict:
-            last = state["transcript"][-1]
-            results = []
-            for call in last["tool_calls"]:
-                name, args = call["name"], call["input"]
-                emit({"type": "tool", "status": "started", "name": name})
-                handler = HANDLERS.get(name)
-                savepoint = session.begin_nested()
-                try:
-                    if handler is None:
-                        raise ToolInputError(f"unknown tool {name}")
-                    out = handler(ctx, args)
-                    savepoint.commit()
-                    if name in WRITE_TOOLS:
-                        session.commit()  # make the change visible to the user right away
-                    summary = out.pop("summary", name)
-                    image = out.pop("__image__", None)
-                    result = {"id": call["id"], "content": json.dumps(out, default=str), "is_error": False}
-                    if image:
-                        result["image"] = image  # shown to the model, never echoed as text
-                    results.append(result)
-                    item = {"tool": name, "ok": True, "summary": summary}
-                    if "code" in out:
-                        item["record"] = {"id": out["id"], "code": out["code"], "type": out["type"]}
-                except (ToolInputError, Exception) as exc:
-                    savepoint.rollback()
-                    message = str(exc) if isinstance(exc, ToolInputError) else f"tool failed: {type(exc).__name__}"
-                    if not isinstance(exc, ToolInputError):
-                        traceback.print_exc()
-                    results.append({"id": call["id"], "content": message, "is_error": True})
-                    item = {"tool": name, "ok": False, "summary": message}
-                run.tool_calls += 1
-                activity.append(item)
-                emit({"type": "tool", "status": "ok" if item["ok"] else "error", "name": name,
-                      "summary": item["summary"], "record": item.get("record")})
-            return {"transcript": [*state["transcript"], {"role": "tool", "results": results}]}
-
-        def after_model(state: State) -> str:
-            if state["stop"]:
-                return END
-            last = state["transcript"][-1]
-            return "tools" if last.get("tool_calls") else END
-
+        loop = Loop(session=session, run=run, chat_model=chat_model, system_prompt=SYSTEM_PROMPT,
+                    tools=TOOL_SPECS, handlers=HANDLERS, write_tools=WRITE_TOOLS, ctx=ctx, emit=emit,
+                    max_iterations=max_iterations)
         graph = StateGraph(State)
-        graph.add_node("model", model_node)
-        graph.add_node("tools", tools_node)
+        loop.add_to(graph)
         graph.add_edge(START, "model")
-        graph.add_conditional_edges("model", after_model, ["tools", END])
-        graph.add_edge("tools", "model")
         app = graph.compile(checkpointer=checkpointer)
 
         try:
@@ -218,77 +137,21 @@ def run_turn(
                 {"transcript": transcript, "iterations": 0, "stop": None},
                 {"configurable": {"thread_id": str(run.id)}, "recursion_limit": 4 * max_iterations + 10},
             )
-        except LLMError as exc:
+        except Exception as exc:
             session.rollback()
-            _record_usage(run, usage, ctx)
-            _finish(session, run, conversation, RunStatus.FAILED, str(exc), emit, activity)
-            return
-        except Exception as exc:  # unexpected failure: keep what was committed, report it
-            traceback.print_exc()
-            session.rollback()
-            _record_usage(run, usage, ctx)
-            _finish(session, run, conversation, RunStatus.FAILED, f"the agent failed unexpectedly ({type(exc).__name__})", emit, activity)
+            record_usage(run, loop.usage, ctx.changeset_seqs)
+            if isinstance(exc, LLMError):
+                detail = str(exc)
+            else:  # unexpected failure: keep what was committed, report it
+                traceback.print_exc()
+                detail = f"the agent failed unexpectedly ({type(exc).__name__})"
+            finish_run(session, run, conversation, RunStatus.FAILED, detail, emit, loop.activity)
             return
 
-        _record_usage(run, usage, ctx)
-        last_text = next((t["text"] for t in reversed(final["transcript"])
-                          if t["role"] == "assistant" and t.get("text")), "")
-        stop = final.get("stop")
-        if stop == "budget":
-            note = "I reached my step limit for this message. What I recorded so far is saved; send a message to continue."
-            _finish(session, run, conversation, RunStatus.STOPPED, "execution budget reached", emit, activity,
-                    text=(last_text + "\n\n" + note).strip())
-        elif stop == "refusal":
-            _finish(session, run, conversation, RunStatus.STOPPED, "the model declined to continue", emit, activity,
-                    text=last_text or "I can't help with that request.")
-        elif stop == "truncated":
-            _finish(session, run, conversation, RunStatus.STOPPED, "a tool call was cut off by the output limit",
-                    emit, activity, text=last_text or "My response was cut off. Please send the message again.")
+        record_usage(run, loop.usage, ctx.changeset_seqs)
+        text = last_text(final["transcript"])
+        if stop := final.get("stop"):
+            detail, text = stop_outcome(stop, text)
+            finish_run(session, run, conversation, RunStatus.STOPPED, detail, emit, loop.activity, text=text)
         else:
-            _finish(session, run, conversation, RunStatus.COMPLETED, None, emit, activity, text=last_text)
-
-
-def _record_usage(run: AgentRun, usage: Usage, ctx: ToolContext) -> None:
-    run.input_tokens, run.output_tokens = usage.input_tokens, usage.output_tokens
-    run.cache_read_tokens, run.cache_write_tokens = usage.cache_read_tokens, usage.cache_write_tokens
-    run.changeset_seqs = list(ctx.changeset_seqs)
-
-
-def _finish(
-    session: Session,
-    run: AgentRun,
-    conversation: Conversation | None,
-    status: RunStatus,
-    detail: str | None,
-    emit: Emit,
-    activity: list[dict[str, Any]],
-    text: str | None = None,
-) -> None:
-    run.status = status
-    run.status_detail = detail
-    run.finished_at = datetime.now(UTC)
-    message = None
-    if conversation is not None:
-        if text is None:
-            text = f"Sorry, I couldn't finish: {detail}"
-        next_ordinal = (session.scalar(
-            select(ConversationMessage.ordinal)
-            .where(ConversationMessage.conversation_id == conversation.id)
-            .order_by(ConversationMessage.ordinal.desc()).limit(1)
-        ) or 0) + 1
-        message = ConversationMessage(
-            tenant_id=run.tenant_id, project_id=run.project_id, conversation_id=conversation.id,
-            ordinal=next_ordinal, role=MessageRole.ASSISTANT, text=text, attachments=[],
-            activity=activity, run_id=run.id, author_id=run.id,
-        )
-        session.add(message)
-    session.commit()
-    emit({
-        "type": "done",
-        "status": str(status),
-        "detail": detail,
-        "message_id": str(message.id) if message else None,
-        "run": {"id": str(run.id), "iterations": run.iterations, "tool_calls": run.tool_calls,
-                "input_tokens": run.input_tokens, "output_tokens": run.output_tokens,
-                "cache_read_tokens": run.cache_read_tokens},
-    })
+            finish_run(session, run, conversation, RunStatus.COMPLETED, None, emit, loop.activity, text=text)

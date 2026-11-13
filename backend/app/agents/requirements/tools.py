@@ -35,8 +35,7 @@ from app.domain.tenancy import InvalidOperation
 READ_PAGE = 12  # passages per read_document call
 
 
-class ToolInputError(Exception):
-    """The model called a tool with unusable input. The message goes back to the model."""
+from app.agents.runtime import ToolInputError  # noqa: E402  (shared with the other agents)
 
 
 def _obj(properties: dict[str, Any]) -> dict[str, Any]:

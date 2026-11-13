@@ -10,6 +10,7 @@ from app.adapters.storage import ObjectStore, store_from_settings
 from app.adapters.vision import ImageDescriber, describer_from_settings
 from app.api.auth import TokenVerifier, verifier_from_settings
 from app.api.conversation_routes import router as conversation_router
+from app.api.design_routes import router as design_router
 from app.api.document_routes import router as document_router
 from app.api.source_routes import router as source_router
 from app.api.modeling_routes import router as modeling_router
@@ -21,15 +22,18 @@ from app.domain.modeling import StaleUpdate
 from app.domain.tenancy import InvalidOperation
 
 
-def _chat_model_from_settings(settings) -> ChatModel:
-    if settings.requirements_agent_provider == "anthropic":
+def _chat_model_from_settings(settings, agent: str = "business_requirements") -> ChatModel:
+    """The chat model for one agent, from that agent's provider, model and effort settings."""
+    prefix = {"business_requirements": "requirements_agent", "architect": "architect_agent"}[agent]
+    provider = getattr(settings, f"{prefix}_provider")
+    if provider == "anthropic":
         return AnthropicChatModel(
-            settings.anthropic_api_key, settings.requirements_agent_model,
-            settings.requirements_agent_effort, settings.agent_max_tokens,
+            settings.anthropic_api_key, getattr(settings, f"{prefix}_model"),
+            getattr(settings, f"{prefix}_effort"), settings.agent_max_tokens,
         )
-    if settings.requirements_agent_provider == "fake":
-        return ScriptedChatModel([{"text": "The fake model is configured; set KLEANDBM_REQUIREMENTS_AGENT_PROVIDER=anthropic."}])
-    raise LLMError(f"unknown agent provider {settings.requirements_agent_provider!r}")
+    if provider == "fake":
+        return ScriptedChatModel([{"text": f"The fake model is configured; set KLEANDBM_{prefix.upper()}_PROVIDER=anthropic."}])
+    raise LLMError(f"unknown agent provider {provider!r}")
 
 
 class _LazyCheckpointer:
@@ -89,7 +93,8 @@ def create_app(
     app.state.image_describer = image_describer or describer_from_settings(settings)
     # Agents run in worker threads with their own sessions, so they need a factory, not a session.
     app.state.session_factory = session_factory or _session_factory()
-    app.state.chat_model_factory = chat_model_factory or (lambda: _chat_model_from_settings(settings))
+    # Called with the agent name ("business_requirements", "architect").
+    app.state.chat_model_factory = chat_model_factory or (lambda agent: _chat_model_from_settings(settings, agent))
     app.state.agent_checkpointer = agent_checkpointer if agent_checkpointer is not None else _LazyCheckpointer(settings)
     app.state.source_connector = source_connector or StdioMySqlConnector(
         settings.mcp_dir, settings.source_query_timeout_ms, settings.source_call_timeout_s,
@@ -138,6 +143,7 @@ def create_app(
     app.include_router(document_router)
     app.include_router(source_router)
     app.include_router(conversation_router)
+    app.include_router(design_router)
     return app
 
 

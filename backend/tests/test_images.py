@@ -114,7 +114,7 @@ def test_agent_can_look_at_an_image(proj):
         {"tool_calls": [{"name": "view_image", "input": {"version_id": text["id"]}}]},
         {"text": "The dashboard shows one KPI."},
     ])
-    proj.client.app.state.chat_model_factory = lambda: model
+    proj.client.app.state.chat_model_factory = lambda *_: model
     resp = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages", json={"text": "Look at the dashboard"})
     assert resp.status_code == 200
 

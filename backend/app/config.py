@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     requirements_agent_model: str = "claude-opus-5-5"
     requirements_agent_effort: str = "high"  # low | medium | high | xhigh | max
     agent_max_iterations: int = 14  # model calls per run, a hard execution budget
+    # The Architect investigates sources and designs a whole model, so it gets a larger budget.
+    architect_agent_provider: str = "anthropic"  # "anthropic" | "fake"
+    architect_agent_model: str = "claude-opus-5-5"
+    architect_agent_effort: str = "high"
+    architect_max_iterations: int = 40
+    # ask_requirements: Business Requirements consultations per Architect run, and the model
+    # calls each consultation may make. Bounded so the exchange never becomes its own loop.
+    architect_max_consultations: int = 3
+    consultation_max_iterations: int = 8
     agent_max_tokens: int = 16000
     # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
     agent_checkpoints: bool = True

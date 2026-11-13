@@ -21,7 +21,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.adapters.llm import LLMError
+from app.agents.architect.agent import run_design
 from app.agents.requirements.agent import run_turn
+from app.api.source_routes import get_box
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.config import get_settings
 from app.persistence.conversations import AgentRun, RunStatus
@@ -81,6 +83,10 @@ class RunOut(BaseModel):
     id: uuid.UUID
     agent: str
     llm_model: str
+    # A consultation run (e.g. the Business Requirements agent answering the Architect) names
+    # the run that started it; a run lists the consultations it started.
+    parent_run_id: uuid.UUID | None
+    child_run_ids: list[uuid.UUID]
     status: str
     status_detail: str | None
     iterations: int
@@ -119,7 +125,8 @@ def list_messages(conversation_id: uuid.UUID, session: SessionDep, scope: Projec
 def get_run(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> RunOut:
     r = conversations.get_run(session, scope, run_id)
     return RunOut(
-        id=r.id, agent=r.agent, llm_model=r.llm_model, status=str(r.status), status_detail=r.status_detail,
+        id=r.id, agent=r.agent, llm_model=r.llm_model, parent_run_id=r.parent_run_id,
+        child_run_ids=[c.id for c in conversations.child_runs(session, scope, r.id)], status=str(r.status), status_detail=r.status_detail,
         iterations=r.iterations, tool_calls=r.tool_calls, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
         cache_read_tokens=r.cache_read_tokens, cache_write_tokens=r.cache_write_tokens,
         changeset_seqs=list(r.changeset_seqs or []), started_at=r.started_at, finished_at=r.finished_at,
@@ -131,9 +138,10 @@ def send_message(
     conversation_id: uuid.UUID, body: MessageIn, request: Request, session: SessionDep, scope: ProjectScopeDep
 ) -> StreamingResponse:
     settings = get_settings()
+    conversation = conversations.get_conversation(session, scope, conversation_id)
     # Build the model before storing anything, so a missing key fails the request cleanly.
     try:
-        chat_model = request.app.state.chat_model_factory()
+        chat_model = request.app.state.chat_model_factory(conversation.agent)
     except LLMError as exc:
         from app.domain.tenancy import InvalidOperation
 
@@ -148,13 +156,33 @@ def send_message(
     app_state = request.app.state
     tenant_id, project_id, run_id = scope.tenant_id, scope.project_id, run.id
 
+    agent = conversation.agent
+    box = get_box() if agent == "architect" and settings.secrets_key else None
+    requirements_model = None
+    if agent == "architect":  # drives the Business Requirements subgraph behind ask_requirements
+        try:
+            requirements_model = request.app.state.chat_model_factory("business_requirements")
+        except LLMError:
+            requirements_model = None
+
     def worker() -> None:
         try:
-            run_turn(
-                app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
-                chat_model=chat_model, embedder=app_state.embedder, max_iterations=settings.agent_max_iterations,
-                emit=events.put, checkpointer=_checkpointer(app_state), store=app_state.object_store,
-            )
+            if agent == "architect":
+                run_design(
+                    app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
+                    chat_model=chat_model, embedder=app_state.embedder,
+                    max_iterations=settings.architect_max_iterations, emit=events.put,
+                    connector=app_state.source_connector, box=box,
+                    checkpointer=_checkpointer(app_state), store=app_state.object_store,
+                    requirements_model=requirements_model, max_consultations=settings.architect_max_consultations,
+                    consultation_max_iterations=settings.consultation_max_iterations,
+                )
+            else:
+                run_turn(
+                    app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
+                    chat_model=chat_model, embedder=app_state.embedder, max_iterations=settings.agent_max_iterations,
+                    emit=events.put, checkpointer=_checkpointer(app_state), store=app_state.object_store,
+                )
         except Exception as exc:  # run_turn records its own outcomes; this catches setup failures
             traceback.print_exc()
             _mark_failed(app_state.session_factory, run_id, f"the agent could not start ({type(exc).__name__})")

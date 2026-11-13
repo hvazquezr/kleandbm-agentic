@@ -127,6 +127,235 @@
         "title": "Body_upload_version_tenants__tenant_id__projects__project_id__documents__document_id__versions_post",
         "type": "object"
       },
+      "CandidateDiff": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "changed",
+          "removed"
+        ],
+        "title": "CandidateDiff",
+        "type": "object"
+      },
+      "CandidateOut": {
+        "properties": {
+          "applied_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Seq"
+          },
+          "base_seq": {
+            "title": "Base Seq",
+            "type": "integer"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateDiff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hard_failures": {
+            "title": "Hard Failures",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "internal_checks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Internal Checks",
+            "type": "array"
+          },
+          "model_id": {
+            "format": "uuid",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "tables": {
+            "title": "Tables",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "model_id",
+          "run_id",
+          "status",
+          "base_seq",
+          "summary",
+          "tables",
+          "hard_failures",
+          "applied_seq",
+          "created_at",
+          "content",
+          "internal_checks",
+          "diff",
+          "stale"
+        ],
+        "title": "CandidateOut",
+        "type": "object"
+      },
+      "CandidateSummary": {
+        "properties": {
+          "applied_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Seq"
+          },
+          "base_seq": {
+            "title": "Base Seq",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "hard_failures": {
+            "title": "Hard Failures",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "format": "uuid",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "tables": {
+            "title": "Tables",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "model_id",
+          "run_id",
+          "status",
+          "base_seq",
+          "summary",
+          "tables",
+          "hard_failures",
+          "applied_seq",
+          "created_at"
+        ],
+        "title": "CandidateSummary",
+        "type": "object"
+      },
       "Cardinality": {
         "enum": [
           "many_to_one",
@@ -2427,6 +2656,14 @@
             "title": "Changeset Seqs",
             "type": "array"
           },
+          "child_run_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Child Run Ids",
+            "type": "array"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -2460,6 +2697,18 @@
             "title": "Output Tokens",
             "type": "integer"
           },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -2489,6 +2738,8 @@
           "id",
           "agent",
           "llm_model",
+          "parent_run_id",
+          "child_run_ids",
           "status",
           "status_detail",
           "iterations",
@@ -3688,6 +3939,211 @@
         ]
       }
     },
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}": {
+      "get": {
+        "operationId": "get_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Candidate",
+        "tags": [
+          "design"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/apply": {
+      "post": {
+        "description": "A person applies a proposed design as one changeset. Refused (409) if the model changed since.",
+        "operationId": "apply_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Candidate",
+        "tags": [
+          "design"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}/discard": {
+      "post": {
+        "operationId": "discard_candidate_tenants__tenant_id__projects__project_id__candidates__candidate_id__discard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discard Candidate",
+        "tags": [
+          "design"
+        ]
+      }
+    },
     "/tenants/{tenant_id}/projects/{project_id}/changesets": {
       "post": {
         "operationId": "apply_changeset_tenants__tenant_id__projects__project_id__changesets_post",
@@ -4852,6 +5308,78 @@
         "summary": "Create Model",
         "tags": [
           "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/candidates": {
+      "get": {
+        "operationId": "list_candidates_tenants__tenant_id__projects__project_id__models__model_id__candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CandidateSummary"
+                  },
+                  "title": "Response List Candidates Tenants  Tenant Id  Projects  Project Id  Models  Model Id  Candidates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Candidates",
+        "tags": [
+          "design"
         ]
       }
     },
