@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.domain import documents, modeling
 from app.domain.access import NotFoundInScope, Permission, ProjectScope
+from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 
@@ -76,10 +77,12 @@ def start_turn(
     text: str,
     attachment_version_ids: list[uuid.UUID],
     llm_model: str,
-) -> AgentRun:
-    """Store the user's message and create the run that will answer it."""
+) -> tuple[AgentRun, bool]:
+    """Store the user's message and create the run that will answer it. Returns the run and
+    whether credentials were redacted from the message."""
     scope.require(Permission.PROJECT_EDIT)
     conversation = get_conversation(session, scope, conversation_id)
+    text, redacted = redact_credentials(text)  # before it's stored or sent anywhere
     if not text.strip() and not attachment_version_ids:
         raise InvalidOperation("the message is empty")
     running = session.scalar(
@@ -108,7 +111,7 @@ def start_turn(
         activity=[], run_id=run.id, author_id=_user(scope),
     ))
     session.flush()
-    return run
+    return run, redacted
 
 
 def get_run(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> AgentRun:

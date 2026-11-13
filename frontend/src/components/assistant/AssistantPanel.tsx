@@ -116,7 +116,10 @@ export function AssistantPanel({
     try {
       const conv = conversation ?? (await createConversation.mutateAsync({ model_id: modelId, title: "Requirements" }));
       await sendAgentMessage(path, conv.id, { text: sending.text, attachment_version_ids: sending.attachments.map((a) => a.versionId) }, (e: AgentEvent) => {
-        if (e.type === "run") setLiveRunId(e.run_id);
+        if (e.type === "run") {
+          setLiveRunId(e.run_id);
+          if (e.redacted_credentials) toast.warning("Credentials were removed from your message before it was saved or sent. Add data sources on the Sources tab instead.");
+        }
         else if (e.type === "text") setLiveText((t) => t + e.text);
         else if (e.type === "tool") {
           setLiveTools((ts) => {

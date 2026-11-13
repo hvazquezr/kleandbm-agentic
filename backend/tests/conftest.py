@@ -156,4 +156,7 @@ def as_user(client, make_token):
         def patch(self, url, **kw):
             return client.patch(url, headers=self.headers, **kw)
 
+        def delete(self, url, **kw):
+            return client.delete(url, headers=self.headers, **kw)
+
     return _User

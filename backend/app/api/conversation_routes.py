@@ -138,7 +138,7 @@ def send_message(
         from app.domain.tenancy import InvalidOperation
 
         raise InvalidOperation(str(exc)) from exc
-    run = conversations.start_turn(
+    run, redacted = conversations.start_turn(
         session, scope, conversation_id, text=body.text,
         attachment_version_ids=body.attachment_version_ids, llm_model=chat_model.model,
     )
@@ -168,7 +168,7 @@ def send_message(
     threading.Thread(target=worker, name=f"agent-run-{run_id}", daemon=True).start()
 
     def stream() -> Iterator[str]:
-        yield f"data: {json.dumps({'type': 'run', 'run_id': str(run_id)})}\n\n"
+        yield f"data: {json.dumps({'type': 'run', 'run_id': str(run_id), 'redacted_credentials': redacted})}\n\n"
         while (event := events.get()) is not None:
             yield f"data: {json.dumps(event, default=str)}\n\n"
 

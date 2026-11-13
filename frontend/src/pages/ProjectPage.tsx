@@ -5,6 +5,7 @@ import { InlineCreate } from "@/components/InlineCreate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SourcesManager } from "@/components/sources/SourcesManager";
 
 export default function ProjectPage() {
   const { tenantId, projectId } = useParams<{ tenantId: string; projectId: string }>();
@@ -58,6 +59,11 @@ export default function ProjectPage() {
           </Link>
         ))}
       </div>
+
+      <section className="space-y-3 pt-4">
+        <h2 className="text-lg font-semibold">Data sources</h2>
+        <SourcesManager path={path} role={project.data?.role} />
+      </section>
     </div>
   );
 }

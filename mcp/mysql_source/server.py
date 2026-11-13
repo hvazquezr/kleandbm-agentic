@@ -92,6 +92,11 @@ def build_server(inspector: Inspector) -> MCPServer:
         return guarded(inspector.sample_rows)(table, limit, columns)
 
     @server.tool(annotations=READ_ONLY)
+    def account_privileges() -> dict[str, Any]:
+        """The connected account's grants and whether it is strictly read-only."""
+        return guarded(inspector.account_privileges)()
+
+    @server.tool(annotations=READ_ONLY)
     def schema_fingerprint() -> dict[str, Any]:
         """Hash identifying the current schema (tables, columns, types, nullability, keys)."""
         return guarded(inspector.fingerprint)()

@@ -41,17 +41,29 @@ needs_mysql = pytest.mark.skipif(not NORTHSTAR_PASSWORD, reason="Northstar MySQL
 
 
 class FakeConnector:
-    """Records the parameters it was opened with and returns canned results."""
+    """Records the parameters it was opened with and returns canned results. Set read_only to
+    False to simulate an account with write privileges, or fail_connect to simulate a bad password."""
 
     def __init__(self) -> None:
         self.opened: list[ConnectionParams] = []
+        self.read_only = True
+        self.fail_connect = False
 
     @contextmanager
     def open(self, params: ConnectionParams):
         self.opened.append(params)
+        if self.fail_connect:
+            raise ConnectionError("Access denied for user (using password: YES)")
+        outer = self
 
         class S:
             def call(self, tool, arguments):
+                if tool == "account_privileges":
+                    problems = [] if outer.read_only else ["DELETE, INSERT, UPDATE on *.*"]
+                    return ToolResult(False, {"read_only": outer.read_only, "problems": problems,
+                                              "warnings": [], "grants": ["GRANT SELECT ..."]}, None)
+                if tool == "list_tables":
+                    return ToolResult(False, {"schema_fingerprint": FINGERPRINT, "tables": [{"table": "orders"}]}, None)
                 if arguments.get("table") == "missing":
                     return ToolResult(True, None, "unknown table 'missing'")
                 return ToolResult(False, {"schema_fingerprint": FINGERPRINT, "tool": tool, **arguments}, None)
@@ -189,7 +201,7 @@ def test_sources_and_evidence_are_tenant_scoped(proj, as_user):
     assert bob.post(f"{bob_base}/sources/{conn['id']}/tools/list_tables", json={}).status_code == 404
     assert bob.get(f"{bob_base}/sources/{conn['id']}/evidence").status_code == 404
     assert bob.get(f"{bob_base}/evidence/{evidence['id']}").status_code == 404
-    assert len(proj.connector.opened) == 1  # Bob never got a session on Alice's source
+    assert len(proj.connector.opened) == 2  # Alice's verify + her one call; Bob never got a session
 
 
 # --- Integration with the real Northstar database --------------------------------------------
@@ -275,3 +287,132 @@ def test_connection_ids_dont_cross_projects_in_the_same_tenant(proj, as_user):
     assert proj.alice.get(f"{other_base}/sources/{conn['id']}/evidence").status_code == 404
     assert proj.alice.get(f"{other_base}/evidence/{evidence['id']}").status_code == 404
     assert proj.alice.get(f"{other_base}/sources").json() == []
+
+
+
+# --- Credential safety (P4a) ------------------------------------------------------------------
+
+
+def test_credentials_are_verified_before_they_are_stored(proj, db_session_factory):
+    proj.connector.fail_connect = True
+    resp = proj.alice.post(f"{proj.base}/sources", json=CONN)
+    assert resp.status_code == 409 and "could not connect" in resp.json()["detail"]
+
+    proj.connector.fail_connect = False
+    proj.connector.read_only = False
+    resp = proj.alice.post(f"{proj.base}/sources", json=CONN)
+    assert resp.status_code == 409 and "isn't read-only" in resp.json()["detail"] and "INSERT" in resp.json()["detail"]
+
+    with db_session_factory() as s:
+        assert s.scalar(select(SourceConnection)) is None  # nothing stored for either attempt
+
+    proj.connector.read_only = True
+    ok = proj.alice.post(f"{proj.base}/sources", json=CONN).json()
+    assert ok["privilege_check"]["read_only"] is True and ok["privilege_check"]["tables"] == 1
+
+
+def test_privileges_are_rechecked_before_every_session(proj):
+    conn = proj.alice.post(f"{proj.base}/sources", json=CONN).json()
+    proj.connector.read_only = False  # someone granted write access after the connection was saved
+    resp = proj.alice.post(f"{proj.base}/sources/{conn['id']}/tools/list_tables", json={})
+    assert resp.status_code == 409 and "no longer read-only" in resp.json()["detail"]
+
+
+def test_rotate_test_and_disable(proj, db_session_factory, secrets_key, as_user):
+    conn = proj.alice.post(f"{proj.base}/sources", json=CONN).json()
+    rotated = proj.alice.patch(f"{proj.base}/sources/{conn['id']}", json={"password": "n3w-pass"})
+    assert rotated.status_code == 200
+    with db_session_factory() as s:
+        assert SecretBox(secrets_key).open(s.scalar(select(SourceConnection)).password_encrypted) == "n3w-pass"
+
+    # A rotation that fails verification leaves the old credentials in place.
+    proj.connector.fail_connect = True
+    assert proj.alice.patch(f"{proj.base}/sources/{conn['id']}", json={"password": "wrong"}).status_code == 409
+    proj.connector.fail_connect = False
+    with db_session_factory() as s:
+        assert SecretBox(secrets_key).open(s.scalar(select(SourceConnection)).password_encrypted) == "n3w-pass"
+
+    editor = as_user("auth0|ed")
+    proj.add_member(editor, "editor")
+    assert editor.post(f"{proj.base}/sources/{conn['id']}/test").status_code == 200
+    assert editor.patch(f"{proj.base}/sources/{conn['id']}", json={"password": "x"}).status_code == 403
+    assert editor.post(f"{proj.base}/sources/{conn['id']}/disable").status_code == 403
+
+    disabled = proj.alice.post(f"{proj.base}/sources/{conn['id']}/disable").json()
+    assert disabled["disabled_at"] is not None
+    assert proj.alice.post(f"{proj.base}/sources/{conn['id']}/tools/list_tables", json={}).status_code == 409
+
+
+def test_models_link_to_sources(proj, as_user):
+    conn = proj.alice.post(f"{proj.base}/sources", json=CONN).json()
+    model = proj.alice.post(f"{proj.base}/models", json={"name": "Sales"}).json()["id"]
+    url = f"{proj.base}/models/{model}/sources"
+    assert proj.alice.put(f"{url}/{conn['id']}").status_code == 204
+    assert proj.alice.put(f"{url}/{conn['id']}").status_code == 204  # idempotent
+    assert [c["name"] for c in proj.alice.get(url).json()] == ["northstar"]
+    viewer = as_user("auth0|vi")
+    proj.add_member(viewer, "viewer")
+    assert viewer.put(f"{url}/{conn['id']}").status_code == 403
+    assert proj.alice.delete(f"{url}/{conn['id']}").status_code == 204
+    assert proj.alice.get(url).json() == []
+
+
+def test_grant_assessment():
+    sys.path.insert(0, str(MCP_DIR))
+    from mysql_source.inspector import assess_grants
+
+    ro = ["GRANT USAGE ON *.* TO `ro`@`%`", "GRANT SELECT, SHOW VIEW ON `northstar_ops`.* TO `ro`@`%`"]
+    assert assess_grants(ro, "northstar_ops")["read_only"] is True
+    for grants in (["GRANT SELECT, INSERT ON `db`.* TO `u`@`%`"],
+                   ["GRANT ALL PRIVILEGES ON `db`.* TO `u`@`%`"],
+                   ["GRANT SELECT ON `db`.* TO `u`@`%` WITH GRANT OPTION"],
+                   ["GRANT BACKUP_ADMIN,ROLE_ADMIN ON *.* TO `u`@`%`"],
+                   ["GRANT `writer`@`%` TO `u`@`%`"]):
+        assert assess_grants(grants, "db")["read_only"] is False, grants
+    assert assess_grants(["GRANT SELECT ON *.* TO `u`@`%`"], "db")["warnings"]
+
+
+@needs_mysql
+def test_real_read_only_account_passes_the_privilege_check():
+    with _in_process_connector().open(_northstar_params()) as session:
+        check = session.call("account_privileges", {}).data
+        assert check["read_only"] is True and not check["problems"]
+
+
+@needs_mysql
+@pytest.mark.parametrize("password,port,expected", [
+    ("definitely-wrong", 3306, "Access denied for user 'northstar_ro'"),
+    ("", 3399, "Can't connect to MySQL server"),
+])
+def test_connection_failures_read_plainly(password, port, expected):
+    """The real MySQL error reaches the user, not an exception group or the SDK's wrapper text."""
+    from app.domain.sources import verify_params
+
+    with pytest.raises(InvalidOperation) as err:
+        verify_params(_in_process_connector(), ConnectionParams("127.0.0.1", port, "northstar_ops", "northstar_ro", password))
+    message = str(err.value)
+    assert message.startswith("could not connect to MySQL:") and expected in message, message
+    assert "ExceptionGroup" not in message and "Error executing tool" not in message
+
+
+def test_exception_groups_are_unwrapped():
+    from app.domain.sources import _first_leaf
+
+    leaf = ConnectionError("Access denied")
+    assert _first_leaf(ExceptionGroup("tg", [ExceptionGroup("inner", [leaf])])) is leaf
+    assert _first_leaf(leaf) is leaf
+
+
+def test_credentials_are_redacted_from_chat(proj, client):
+    from app.adapters.llm import ScriptedChatModel
+
+    model = ScriptedChatModel([{"text": "Please add the source on the Sources page."}])
+    client.app.state.chat_model_factory = lambda: model
+    conv = proj.alice.post(f"{proj.base}/conversations", json={}).json()
+    resp = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages",
+                           json={"text": "use mysql://northstar_ro:S3cret-Pass@127.0.0.1/northstar_ops"})
+    first = [l for l in resp.text.splitlines() if l.startswith("data: ")][0]
+    assert '"redacted_credentials": true' in first
+    stored = proj.alice.get(f"{proj.base}/conversations/{conv['id']}/messages").json()[0]["text"]
+    assert "S3cret-Pass" not in stored and "[redacted credential]" in stored
+    assert "S3cret-Pass" not in str(model.calls)  # never reached the model

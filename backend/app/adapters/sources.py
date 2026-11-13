@@ -43,6 +43,10 @@ class ToolResult:
         return (self.data or {}).get("schema_fingerprint")
 
 
+# Called by the backend itself (never by users or agents) to verify an account is read-only.
+INTERNAL_TOOLS = frozenset({"account_privileges"})
+
+
 class SourceSession(Protocol):
     def call(self, tool: str, arguments: dict[str, Any]) -> ToolResult: ...
 
@@ -76,7 +80,7 @@ class _McpSession:
         self._timeout, self._max_bytes = timeout_s, max_bytes
 
     def call(self, tool: str, arguments: dict[str, Any]) -> ToolResult:
-        if tool not in ALLOWED_TOOLS:
+        if tool not in ALLOWED_TOOLS | INTERNAL_TOOLS:
             return ToolResult(True, None, f"tool {tool!r} is not allowed")
         try:
             result = self._portal.call(lambda: self._client.call_tool(tool, arguments, read_timeout_seconds=self._timeout))
@@ -84,6 +88,7 @@ class _McpSession:
             return ToolResult(True, None, f"{type(exc).__name__}: {exc}"[:2000])
         if result.is_error:
             text = " ".join(getattr(c, "text", "") for c in (result.content or [])).strip()
+            text = text.removeprefix(f"Error executing tool {tool}: ")  # the SDK's generic wrapper
             return ToolResult(True, None, text[:2000] or "tool error")
         data, truncated = _cap(result.structured_content or {}, self._max_bytes)
         return ToolResult(False, data, None, truncated)

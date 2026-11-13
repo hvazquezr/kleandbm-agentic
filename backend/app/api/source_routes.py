@@ -38,6 +38,14 @@ class ConnectionIn(BaseModel):
     password: str = Field(max_length=512)
 
 
+class ConnectionUpdate(BaseModel):
+    host: str | None = Field(default=None, max_length=255)
+    port: int | None = None
+    database: str | None = Field(default=None, max_length=128)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
 class ConnectionOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -48,6 +56,8 @@ class ConnectionOut(BaseModel):
     username: str
     last_schema_fingerprint: str | None
     last_verified_at: datetime | None
+    privilege_check: dict[str, Any] | None
+    disabled_at: datetime | None
     created_at: datetime
 
 
@@ -77,7 +87,8 @@ def _conn_out(c: SourceConnection) -> ConnectionOut:
     return ConnectionOut(
         id=c.id, name=c.name, kind=str(c.kind), host=c.host, port=c.port, database=c.database,
         username=c.username, last_schema_fingerprint=c.last_schema_fingerprint,
-        last_verified_at=c.last_verified_at, created_at=c.created_at,
+        last_verified_at=c.last_verified_at, privilege_check=c.privilege_check, disabled_at=c.disabled_at,
+        created_at=c.created_at,
     )
 
 
@@ -96,13 +107,55 @@ def list_sources(session: SessionDep, scope: ProjectScopeDep) -> list[Connection
 
 
 @router.post("/sources", status_code=status.HTTP_201_CREATED)
-def create_source(body: ConnectionIn, session: SessionDep, scope: ProjectScopeDep, box: BoxDep) -> ConnectionOut:
+def create_source(
+    body: ConnectionIn, session: SessionDep, scope: ProjectScopeDep, box: BoxDep, connector: ConnectorDep
+) -> ConnectionOut:
+    """Connects and checks the account is read-only before anything is stored."""
     connection = sources.create_connection(
-        session, scope, box, get_settings().source_allowed_hosts,
+        session, scope, box, connector, get_settings().source_allowed_hosts,
         name=body.name, host=body.host, port=body.port, database=body.database,
         username=body.username, password=body.password,
     )
     return _conn_out(connection)
+
+
+@router.patch("/sources/{connection_id}")
+def update_source(
+    connection_id: uuid.UUID, body: ConnectionUpdate, session: SessionDep, scope: ProjectScopeDep,
+    box: BoxDep, connector: ConnectorDep,
+) -> ConnectionOut:
+    """Change or rotate credentials; the new settings are verified before they're saved."""
+    return _conn_out(sources.update_connection(
+        session, scope, box, connector, get_settings().source_allowed_hosts, connection_id,
+        host=body.host, port=body.port, database=body.database, username=body.username, password=body.password,
+    ))
+
+
+@router.post("/sources/{connection_id}/test")
+def test_source(
+    connection_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep, box: BoxDep, connector: ConnectorDep
+) -> ConnectionOut:
+    return _conn_out(sources.test_connection(session, scope, box, connector, connection_id))
+
+
+@router.post("/sources/{connection_id}/disable")
+def disable_source(connection_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> ConnectionOut:
+    return _conn_out(sources.disable_connection(session, scope, connection_id))
+
+
+@router.get("/models/{model_id}/sources")
+def list_model_sources(model_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[ConnectionOut]:
+    return [_conn_out(c) for c in sources.model_sources(session, scope, model_id)]
+
+
+@router.put("/models/{model_id}/sources/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def link_model_source(model_id: uuid.UUID, connection_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> None:
+    sources.link_model_source(session, scope, model_id, connection_id)
+
+
+@router.delete("/models/{model_id}/sources/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_model_source(model_id: uuid.UUID, connection_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> None:
+    sources.unlink_model_source(session, scope, model_id, connection_id)
 
 
 @router.post("/sources/{connection_id}/tools/{tool}")

@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "wouter";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
+import { SourcesManager } from "@/components/sources/SourcesManager";
 import type { Schemas } from "@/api/client";
 import { useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
 import ModelCanvas, { type ModelCanvasHandle } from "@/components/canvas/ModelCanvas";
@@ -150,6 +151,7 @@ export default function ModelEditor() {
               <TabsTrigger value="assistant">Assistant</TabsTrigger>
               <TabsTrigger value="inspect">Inspector</TabsTrigger>
               <TabsTrigger value="registers">Registers</TabsTrigger>
+              <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="versions">Versions</TabsTrigger>
             </TabsList>
             {/* The assistant scrolls its own transcript and keeps its composer pinned. */}
@@ -196,6 +198,9 @@ export default function ModelEditor() {
                 <TabsContent value="registers">
                   <RegistersPanel snapshot={snap} canApprove={canApprove && viewingSeq === undefined} write={write}
                     onSelectRecord={(id) => { setSelection({ kind: "record", id }); setTab("inspect"); }} />
+                </TabsContent>
+                <TabsContent value="sources">
+                  <SourcesManager path={path} role={role} modelId={modelId} />
                 </TabsContent>
                 <TabsContent value="versions">
                   <VersionsPanel path={path} modelId={modelId} snapshot={snap} canEdit={canEdit} canApprove={canApprove}

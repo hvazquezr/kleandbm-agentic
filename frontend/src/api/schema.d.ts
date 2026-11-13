@@ -373,6 +373,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Sources */
+        get: operations["list_model_sources_tenants__tenant_id__projects__project_id__models__model_id__sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Link Model Source */
+        put: operations["link_model_source_tenants__tenant_id__projects__project_id__models__model_id__sources__connection_id__put"];
+        post?: never;
+        /** Unlink Model Source */
+        delete: operations["unlink_model_source_tenants__tenant_id__projects__project_id__models__model_id__sources__connection_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state": {
         parameters: {
             query?: never;
@@ -487,8 +522,48 @@ export interface paths {
         /** List Sources */
         get: operations["list_sources_tenants__tenant_id__projects__project_id__sources_get"];
         put?: never;
-        /** Create Source */
+        /**
+         * Create Source
+         * @description Connects and checks the account is read-only before anything is stored.
+         */
         post: operations["create_source_tenants__tenant_id__projects__project_id__sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Source
+         * @description Change or rotate credentials; the new settings are verified before they're saved.
+         */
+        patch: operations["update_source_tenants__tenant_id__projects__project_id__sources__connection_id__patch"];
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Source */
+        post: operations["disable_source_tenants__tenant_id__projects__project_id__sources__connection_id__disable_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -506,6 +581,23 @@ export interface paths {
         get: operations["list_source_evidence_tenants__tenant_id__projects__project_id__sources__connection_id__evidence_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Source */
+        post: operations["test_source_tenants__tenant_id__projects__project_id__sources__connection_id__test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -668,6 +760,8 @@ export interface components {
             created_at: string;
             /** Database */
             database: string;
+            /** Disabled At */
+            disabled_at: string | null;
             /** Host */
             host: string;
             /**
@@ -685,8 +779,25 @@ export interface components {
             name: string;
             /** Port */
             port: number;
+            /** Privilege Check */
+            privilege_check: {
+                [key: string]: unknown;
+            } | null;
             /** Username */
             username: string;
+        };
+        /** ConnectionUpdate */
+        ConnectionUpdate: {
+            /** Database */
+            database?: string | null;
+            /** Host */
+            host?: string | null;
+            /** Password */
+            password?: string | null;
+            /** Port */
+            port?: number | null;
+            /** Username */
+            username?: string | null;
         };
         /** ConversationIn */
         ConversationIn: {
@@ -2616,6 +2727,103 @@ export interface operations {
             };
         };
     };
+    list_model_sources_tenants__tenant_id__projects__project_id__models__model_id__sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_model_source_tenants__tenant_id__projects__project_id__models__model_id__sources__connection_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_model_source_tenants__tenant_id__projects__project_id__models__model_id__sources__connection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_state_tenants__tenant_id__projects__project_id__models__model_id__state_get: {
         parameters: {
             query?: never;
@@ -2961,6 +3169,76 @@ export interface operations {
             };
         };
     };
+    update_source_tenants__tenant_id__projects__project_id__sources__connection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_source_tenants__tenant_id__projects__project_id__sources__connection_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_source_evidence_tenants__tenant_id__projects__project_id__sources__connection_id__evidence_get: {
         parameters: {
             query?: {
@@ -2983,6 +3261,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_source_tenants__tenant_id__projects__project_id__sources__connection_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"];
                 };
             };
             /** @description Validation Error */

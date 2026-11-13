@@ -5,7 +5,7 @@
 import { ApiError, authHeaders } from "./client";
 
 export type AgentEvent =
-  | { type: "run"; run_id: string }
+  | { type: "run"; run_id: string; redacted_credentials?: boolean }
   | { type: "text"; text: string }
   | {
       type: "tool";

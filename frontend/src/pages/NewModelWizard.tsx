@@ -4,15 +4,14 @@ import { toast } from "sonner";
 import { Link, useLocation, useParams } from "wouter";
 import { uploadDocument } from "@/api/agent";
 import {
-  useCallSourceTool,
   useCreateModel,
-  useCreateSource,
   useDocuments,
+  useModelSources,
   useProject,
   useSnapshot,
-  useSources,
   type ProjectPath,
 } from "@/api/hooks";
+import { SourcesManager } from "@/components/sources/SourcesManager";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { Field } from "@/components/editor/fields";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +40,6 @@ export default function NewModelWizard() {
   const [modelId, setModelId] = useState<string | null>(null);
   const [ctx, setCtx] = useState<Context>({ name: "", domain: "", goal: "", notes: "" });
 
-  const isOwner = project.data?.role === "owner";
   const canEdit = project.data && project.data.role !== "viewer";
   if (project.data && !canEdit) {
     return <p className="text-muted-foreground">You need edit access to create a model in this project.</p>;
@@ -75,7 +73,7 @@ export default function NewModelWizard() {
           onDone={(id) => { setModelId(id); setStep(1); }} />
       )}
       {step === 1 && <DocumentsStep path={path} onBack={() => setStep(0)} onNext={() => setStep(2)} />}
-      {step === 2 && <SourceStep path={path} isOwner={!!isOwner} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 2 && modelId && <SourceStep path={path} modelId={modelId} role={project.data?.role} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && modelId && (
         <RequirementsStep path={path} modelId={modelId} draft={kickoff(ctx)} onBack={() => setStep(2)} onNext={() => setStep(4)} />
       )}
@@ -189,69 +187,20 @@ function DocumentsStep({ path, onBack, onNext }: { path: ProjectPath; onBack: ()
   );
 }
 
-function SourceStep({ path, isOwner, onBack, onNext }: { path: ProjectPath; isOwner: boolean; onBack: () => void; onNext: () => void }) {
-  const sources = useSources(path);
-  const createSource = useCreateSource(path);
-  const callTool = useCallSourceTool(path);
-  const [form, setForm] = useState({ name: "", host: "127.0.0.1", port: "3306", database: "", username: "", password: "" });
-  const [result, setResult] = useState<string | null>(null);
-
-  const connect = async () => {
-    setResult(null);
-    try {
-      const conn = await createSource.mutateAsync({ ...form, port: Number(form.port) || 3306 });
-      const evidence = await callTool.mutateAsync({ connectionId: conn.id, tool: "list_tables", purpose: "Connection check from the new-model wizard" });
-      if (evidence.is_error) {
-        setResult(`Saved, but the check failed: ${evidence.error}`);
-      } else {
-        const tables = (evidence.result?.tables as unknown[] | undefined)?.length ?? 0;
-        setResult(`Connected: ${tables} table${tables === 1 ? "" : "s"} found.`);
-        setForm({ ...form, password: "" });
-      }
-    } catch (err) {
-      setResult(err instanceof Error ? err.message : "Could not connect");
-    }
-  };
-
+function SourceStep({ path, modelId, role, onBack, onNext }: {
+  path: ProjectPath; modelId: string; role: string | undefined; onBack: () => void; onNext: () => void;
+}) {
+  const linked = useModelSources(path, modelId);
   return (
     <Card><CardContent className="space-y-4 pt-6">
       <p className="text-sm text-muted-foreground">
-        Optional. A read-only connection to a MySQL source lets the agents check what the data can support. You can skip this and add it later; the model can start from documents and conversation alone.
+        Optional. A read-only connection to a MySQL source lets the agents check what the data can support. You can skip this
+        and add it later from the model's Sources tab; the model can start from documents and conversation alone.
       </p>
-      {sources.data && sources.data.length > 0 && (
-        <ul className="space-y-1.5">
-          {sources.data.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 text-sm rounded-md border px-3 py-2">
-              <Database className="size-4 text-muted-foreground" /> {s.name}
-              <span className="text-xs text-muted-foreground">{s.username}@{s.host}:{s.port}/{s.database}</span>
-              {s.last_verified_at && <Badge variant="outline" className="ml-auto font-normal text-green-400">verified</Badge>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {isOwner ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Northstar operations" /></Field>
-          <Field label="Database"><Input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></Field>
-          <Field label="Host"><Input value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} /></Field>
-          <Field label="Port"><Input value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} /></Field>
-          <Field label="Read-only user"><Input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></Field>
-          <Field label="Password"><Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-          <div className="col-span-2 flex items-center gap-3">
-            <Button variant="outline" onClick={connect}
-              disabled={!form.name || !form.database || !form.username || createSource.isPending || callTool.isPending}>
-              {(createSource.isPending || callTool.isPending) && <Loader2 className="size-4 animate-spin" />} Save and test
-            </Button>
-            {result && <span className="text-sm">{result}</span>}
-          </div>
-          <p className="col-span-2 text-xs text-muted-foreground">Use an account with SELECT-only grants. The password is encrypted and never shown again.</p>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">Only project owners can connect sources.</p>
-      )}
+      <SourcesManager path={path} role={role} modelId={modelId} />
       <Footer onBack={onBack}>
-        <Button variant={sources.data?.length ? "default" : "outline"} onClick={onNext}>
-          {sources.data?.length ? "Next" : "Skip"} <ArrowRight className="size-4" />
+        <Button variant={linked.data?.length ? "default" : "outline"} onClick={onNext}>
+          {linked.data?.length ? "Next" : "Skip"} <ArrowRight className="size-4" />
         </Button>
       </Footer>
     </CardContent></Card>

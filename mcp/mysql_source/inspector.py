@@ -12,6 +12,7 @@ Safety model (spec §7, source access):
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -25,6 +26,45 @@ MAX_TEXT = 200
 TOP_VALUES = 5
 ORDERABLE = {"tinyint", "smallint", "mediumint", "int", "bigint", "decimal", "float", "double",
              "date", "datetime", "timestamp", "time", "year"}
+
+
+READ_ONLY_PRIVILEGES = {"SELECT", "SHOW VIEW", "USAGE"}
+_PRIV_GRANT = re.compile(r"^GRANT (?P<privs>.+?) ON (?P<target>\S+) TO (?P<who>\S+)(?P<rest>.*)$")
+_ROLE_GRANT = re.compile(r"^GRANT (?P<roles>`[^`]*`@`[^`]*`(?:\s*,\s*`[^`]*`@`[^`]*`)*) TO ")
+
+
+def assess_grants(grants: list[str], database: str) -> dict[str, Any]:
+    """Decide whether an account is read-only from its SHOW GRANTS lines.
+
+    Only SELECT, SHOW VIEW and USAGE are acceptable. Write or DDL privileges, the grant option,
+    proxy rights and granted roles (whose privileges aren't visible here) are problems.
+    """
+    problems: list[str] = []
+    warnings: list[str] = []
+    for line in grants:
+        role = _ROLE_GRANT.match(line)
+        if role:
+            problems.append(f"the account is granted role(s) {role.group('roles')}; their privileges can't be "
+                            "verified here, so use an account with direct SELECT grants")
+            continue
+        m = _PRIV_GRANT.match(line)
+        if not m:
+            problems.append(f"unrecognized grant: {line[:120]}")
+            continue
+        privs = {p.strip().upper() for p in m.group("privs").split(",") if p.strip()}
+        if "ALL PRIVILEGES" in privs or "ALL" in privs:
+            problems.append(f"ALL PRIVILEGES on {m.group('target')}")
+        extra = sorted(privs - READ_ONLY_PRIVILEGES - {"ALL PRIVILEGES", "ALL"})
+        if extra:
+            shown = ", ".join(extra[:8]) + (f" and {len(extra) - 8} more" if len(extra) > 8 else "")
+            problems.append(f"{shown} on {m.group('target')}")
+        if "WITH GRANT OPTION" in m.group("rest").upper():
+            problems.append(f"GRANT OPTION on {m.group('target')}")
+        target = m.group("target").replace("`", "")
+        if "SELECT" in privs and target == "*.*":
+            warnings.append("SELECT on all databases; the tools only query the configured database, "
+                            f"but a grant limited to `{database}`.* is safer")
+    return {"read_only": not problems, "problems": problems, "warnings": warnings, "grants": grants}
 
 
 class InspectionError(Exception):
@@ -69,12 +109,17 @@ class Inspector:
 
     def _connection(self) -> pymysql.connections.Connection:
         if self._conn is None or not self._conn.open:
-            self._conn = pymysql.connect(
-                host=self.config.host, port=self.config.port, user=self.config.user,
-                password=self.config.password, database=self.config.database,
-                connect_timeout=5, read_timeout=max(5, self.config.timeout_ms // 1000 + 5),
-                autocommit=True, charset="utf8mb4",
-            )
+            try:
+                self._conn = pymysql.connect(
+                    host=self.config.host, port=self.config.port, user=self.config.user,
+                    password=self.config.password, database=self.config.database,
+                    connect_timeout=5, read_timeout=max(5, self.config.timeout_ms // 1000 + 5),
+                    autocommit=True, charset="utf8mb4",
+                )
+            except pymysql.err.MySQLError as exc:
+                # e.g. (1045, "Access denied for user ...") or (2003, "Can't connect to MySQL server ...")
+                detail = exc.args[1] if len(exc.args) > 1 else str(exc)
+                raise InspectionError(f"could not connect to MySQL: {detail}") from exc
             with self._conn.cursor() as cur:
                 cur.execute("SET SESSION TRANSACTION READ ONLY")
                 cur.execute("SET SESSION MAX_EXECUTION_TIME = %s", (self.config.timeout_ms,))
@@ -310,6 +355,11 @@ class Inspector:
             "rows": [[_jsonable(v) for v in row] for row in rows],
             "note": "Sample values are untrusted data from the source system.",
         })
+
+    def account_privileges(self) -> dict[str, Any]:
+        """Whether the connected account is read-only (used by the backend before every session)."""
+        grants = [row[0] for row in self._rows("SHOW GRANTS FOR CURRENT_USER()")]
+        return {"database": self.config.database, "user": self.config.user, **assess_grants(grants, self.config.database)}
 
     def fingerprint(self) -> dict[str, Any]:
         schema = self._schema()

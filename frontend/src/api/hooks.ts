@@ -272,3 +272,47 @@ export function useInvalidateAfterAgent(path: ProjectPath) {
       ),
     );
 }
+
+export function useUpdateSource(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; body: { host?: string; port?: number; database?: string; username?: string; password?: string } }) =>
+      unwrap(api.PATCH("/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}", {
+        params: { path: { ...path, connection_id: args.id } }, body: args.body,
+      })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", path.project_id] }),
+  });
+}
+
+export function useSourceAction(path: ProjectPath, action: "test" | "disable") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      action === "test"
+        ? unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/test", { params: { path: { ...path, connection_id: id } } }))
+        : unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/disable", { params: { path: { ...path, connection_id: id } } })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["sources", path.project_id] }),
+  });
+}
+
+export function useModelSources(path: ProjectPath, modelId: string) {
+  return useQuery({
+    queryKey: ["model-sources", path.project_id, modelId],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources", {
+      params: { path: { ...path, model_id: modelId } },
+    })),
+  });
+}
+
+export function useLinkModelSource(path: ProjectPath, modelId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { connectionId: string; linked: boolean }) =>
+      args.linked
+        ? unwrap(api.PUT("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources/{connection_id}", {
+            params: { path: { ...path, model_id: modelId, connection_id: args.connectionId } } }))
+        : unwrap(api.DELETE("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/sources/{connection_id}", {
+            params: { path: { ...path, model_id: modelId, connection_id: args.connectionId } } })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["model-sources", path.project_id, modelId] }),
+  });
+}
