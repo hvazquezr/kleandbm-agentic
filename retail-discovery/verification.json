@@ -1,0 +1,9 @@
+{
+  "sourceRows": 27,
+  "gross": 1001700,
+  "discounts": 64098,
+  "returns": 38976,
+  "salesNet": 937602,
+  "financeNet": 898626,
+  "checks": "Reconciliations, representative groups, input propagation and restoration passed"
+}
