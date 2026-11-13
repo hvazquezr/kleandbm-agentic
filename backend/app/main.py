@@ -2,9 +2,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.adapters.embeddings import Embedder, embedder_from_settings
+from app.adapters.sources import SourceConnector, StdioMySqlConnector
 from app.adapters.storage import ObjectStore, store_from_settings
 from app.api.auth import TokenVerifier, verifier_from_settings
 from app.api.document_routes import router as document_router
+from app.api.source_routes import router as source_router
 from app.api.modeling_routes import router as modeling_router
 from app.api.routes import router
 from app.config import get_settings
@@ -17,6 +19,7 @@ def create_app(
     token_verifier: TokenVerifier | None = None,
     object_store: ObjectStore | None = None,
     embedder: Embedder | None = None,
+    source_connector: SourceConnector | None = None,
 ) -> FastAPI:
     app = FastAPI(title="KleanDBM API", version="0.1.0")
     settings = get_settings()
@@ -24,6 +27,10 @@ def create_app(
     # Tests inject their own adapters; otherwise they come from settings.
     app.state.object_store = object_store or store_from_settings(settings)
     app.state.embedder = embedder or embedder_from_settings(settings)
+    app.state.source_connector = source_connector or StdioMySqlConnector(
+        settings.mcp_dir, settings.source_query_timeout_ms, settings.source_call_timeout_s,
+        settings.source_max_result_bytes,
+    )
 
     if token_verifier is None:
         if settings.auth_issuer and settings.auth_audience:
@@ -65,6 +72,7 @@ def create_app(
     app.include_router(router)
     app.include_router(modeling_router)
     app.include_router(document_router)
+    app.include_router(source_router)
     return app
 
 

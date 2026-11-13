@@ -213,6 +213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/evidence/{evidence_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence */
+        get: operations["get_evidence_tenants__tenant_id__projects__project_id__evidence__evidence_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/members/{user_id}": {
         parameters: {
             query?: never;
@@ -386,6 +403,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["list_sources_tenants__tenant_id__projects__project_id__sources_get"];
+        put?: never;
+        /** Create Source */
+        post: operations["create_source_tenants__tenant_id__projects__project_id__sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Source Evidence */
+        get: operations["list_source_evidence_tenants__tenant_id__projects__project_id__sources__connection_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/sources/{connection_id}/tools/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call Tool
+         * @description Run one curated tool. The result, success or error, is recorded as evidence and returned.
+         */
+        post: operations["call_tool_tenants__tenant_id__projects__project_id__sources__connection_id__tools__tool__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -495,6 +567,53 @@ export interface components {
          * @enum {string}
          */
         ConfirmationStatus: "unconfirmed" | "confirmed" | "rejected";
+        /** ConnectionIn */
+        ConnectionIn: {
+            /** Database */
+            database: string;
+            /** Host */
+            host: string;
+            /** Name */
+            name: string;
+            /** Password */
+            password: string;
+            /**
+             * Port
+             * @default 3306
+             */
+            port: number;
+            /** Username */
+            username: string;
+        };
+        /** ConnectionOut */
+        ConnectionOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Database */
+            database: string;
+            /** Host */
+            host: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Last Schema Fingerprint */
+            last_schema_fingerprint: string | null;
+            /** Last Verified At */
+            last_verified_at: string | null;
+            /** Name */
+            name: string;
+            /** Port */
+            port: number;
+            /** Username */
+            username: string;
+        };
         /** CreateOp */
         CreateOp: {
             /** Data */
@@ -589,6 +708,53 @@ export interface components {
             latest: components["schemas"]["app__api__document_routes__VersionOut"];
             /** Title */
             title: string;
+        };
+        /** EvidenceOut */
+        EvidenceOut: {
+            /**
+             * Actor Id
+             * Format: uuid
+             */
+            actor_id: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Arguments */
+            arguments: {
+                [key: string]: unknown;
+            };
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Error */
+            is_error: boolean;
+            /** On Behalf Of */
+            on_behalf_of: string | null;
+            /** Purpose */
+            purpose: string | null;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Schema Fingerprint */
+            schema_fingerprint: string | null;
+            /** Tool */
+            tool: string;
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * FeasibilityStatus
@@ -1195,6 +1361,15 @@ export interface components {
          * @enum {string}
          */
         TenantRole: "admin" | "member";
+        /** ToolCallIn */
+        ToolCallIn: {
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /** Purpose */
+            purpose?: string | null;
+        };
         /** UnlinkOp */
         UnlinkOp: {
             /**
@@ -1851,6 +2026,39 @@ export interface operations {
             };
         };
     };
+    get_evidence_tenants__tenant_id__projects__project_id__evidence__evidence_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidence_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_project_member_tenants__tenant_id__projects__project_id__members__user_id__put: {
         parameters: {
             query?: never;
@@ -2289,6 +2497,147 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchHitOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sources_tenants__tenant_id__projects__project_id__sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_source_tenants__tenant_id__projects__project_id__sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_source_evidence_tenants__tenant_id__projects__project_id__sources__connection_id__evidence_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                connection_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    call_tool_tenants__tenant_id__projects__project_id__sources__connection_id__tools__tool__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                tool: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolCallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceOut"];
                 };
             };
             /** @description Validation Error */

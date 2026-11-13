@@ -41,6 +41,8 @@ class Permission(enum.StrEnum):
     # Authority to confirm business meanings and accept a model (spec §7). Never granted to agents.
     PROJECT_APPROVE = "project:approve"
     PROJECT_MANAGE_MEMBERS = "project:manage_members"
+    # Add or change source connections, which hold credentials. Owner only.
+    PROJECT_MANAGE_SOURCES = "project:manage_sources"
     TENANT_CREATE_PROJECT = "tenant:create_project"
     TENANT_MANAGE_MEMBERS = "tenant:manage_members"
 
@@ -57,6 +59,7 @@ PROJECT_ROLE_PERMISSIONS: dict[ProjectRole, frozenset[Permission]] = {
             Permission.PROJECT_EDIT,
             Permission.PROJECT_APPROVE,
             Permission.PROJECT_MANAGE_MEMBERS,
+            Permission.PROJECT_MANAGE_SOURCES,
         }
     ),
 }

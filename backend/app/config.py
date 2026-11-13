@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     openai_api_key: str = ""
 
+    # Key for encrypting stored secrets such as source passwords (a Fernet key:
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())").
+    secrets_key: str = ""
+
+    # Source access through MCP servers (P2b: MySQL only).
+    mcp_dir: str = "../mcp"  # holds the mysql_source package
+    # Hosts a source connection may point at. A connection makes the backend open a network
+    # connection, so arbitrary hosts would allow probing internal networks (SSRF).
+    source_allowed_hosts: list[str] = ["127.0.0.1", "localhost"]
+    source_query_timeout_ms: int = 5000
+    source_call_timeout_s: float = 20.0
+    source_max_result_bytes: int = 200_000
+
     @field_validator("auth_issuer")
     @classmethod
     def _issuer_trailing_slash(cls, value: str) -> str:
