@@ -1,6 +1,8 @@
-"""Rubric for one Northstar run, from what the run left in the model and registers.
+"""Rubrics for one run, from what the run left in the model and registers.
 
-The checks follow eval/northstar/README.md (the answer key, grader-side only). They are
+grade_northstar follows eval/northstar/README.md (the answer key, grader-side only);
+grade_structures follows Kimball and the no-fabrication rule for the northstar_structures
+requirements (eval/baseline/scenario.py). They are
 keyword heuristics over the run's records, not a judgment of the design: they flag what to
 look at, and the run JSON holds everything needed to check a verdict by hand.
 """
@@ -32,15 +34,29 @@ def _requirement(record: dict[str, Any], phrase: str) -> dict[str, Any] | None:
 
 
 def grade(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """{check name: {"passed": bool, "detail": str}}."""
+    """{check name: {"passed": bool, "detail": str}}, by the record's scenario."""
+    return GRADERS[record.get("scenario") or "northstar"](record)
+
+
+def _checker() -> tuple[dict[str, dict[str, Any]], Any]:
     checks: dict[str, dict[str, Any]] = {}
 
     def check(name: str, passed: bool, detail: str) -> None:
         checks[name] = {"passed": bool(passed), "detail": detail}
 
+    return checks, check
+
+
+def _facts(record: dict[str, Any], check) -> list[dict[str, Any]]:
     facts = [t for t in record["tables"] if t["kind"] == "fact"]
     check("facts_declare_grain", facts and all(t.get("grain") for t in facts),
           f"{len(facts)} facts; without grain: {[t['name'] for t in facts if not t.get('grain')]}")
+    return facts
+
+
+def grade_northstar(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    checks, check = _checker()
+    facts = _facts(record, check)
 
     feasible = [(p, _requirement(record, p)) for p in ("Monthly net revenue", "Monthly returns")]
     check("revenue_and_returns_feasible", all(r and r["feasibility"] in FEASIBLE for _, r in feasible),
@@ -81,3 +97,52 @@ def grade(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     harbor = re.search(r"harbor|\bHBR\b|pilot", questions, re.I)
     check("harbor_store_question", bool(harbor), "a question raises the Harbor pilot store" if harbor else "not raised")
     return checks
+
+
+LINE_GRAIN = re.compile(r"order[ _-]?line|\bline\b", re.I)
+ORDER_GRAIN = re.compile(r"\border\b", re.I)
+HEADER_MEASURE = re.compile(r"shipping|tax", re.I)
+
+
+def grade_structures(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    checks, check = _checker()
+    facts = _facts(record, check)
+
+    # Two store roles: the selling store and the customer's home store, as two relationships
+    # into the store dimension (role-playing) or a home store reached through the customer.
+    into_store = {(r["from_table"], r["from_attribute"]) for r in record.get("relationships") or []
+                  if re.search(r"store", r.get("to_table") or "", re.I)}
+    home_attrs = [f"{t['name']}.{a}" for t in record["tables"] for a in t["attributes"] if re.search(r"home_?store", a, re.I)]
+    check("store_roles_distinguished", len(into_store) >= 2 or bool(home_attrs),
+          f"relationships into the store dimension: {sorted(map(str, into_store))}; home store attributes: {home_attrs}")
+
+    # Shipping is charged per order: it belongs at order grain. On a line-grain table it is
+    # either repeated on every line (double counted) or allocated without an agreed rule.
+    line_facts = [t for t in facts if LINE_GRAIN.search(t.get("grain") or "")]
+    on_lines = [f"{t['name']}.{a}" for t in line_facts for a in t["attributes"] if HEADER_MEASURE.search(a)]
+    check("no_order_measures_on_lines", not on_lines, f"shipping/tax attributes at line grain: {on_lines}")
+    order_facts = [t["name"] for t in facts if ORDER_GRAIN.search(t.get("grain") or "")
+                   and not LINE_GRAIN.search(t.get("grain") or "")
+                   and any(re.search(r"shipping", a, re.I) for a in t["attributes"])]
+    check("order_grain_fact_for_order_measures", bool(order_facts), f"order-grain facts with shipping: {order_facts}")
+
+    for name, phrase, wanted in (
+        ("order_value_feasible", "Average order value", FEASIBLE),
+        ("shipping_by_category_honest", "Monthly shipping charged by product category", HONEST_PROFIT),
+        ("refund_rate_feasible", "Monthly refund rate", FEASIBLE),
+        ("sales_by_both_stores_feasible", "Monthly net sales by product category", FEASIBLE),
+    ):
+        r = _requirement(record, phrase)
+        check(name, r is not None and r["feasibility"] in wanted, f"feasibility {r['feasibility'] if r else 'missing'}")
+
+    returns_facts = [t["name"] for t in facts if re.search(r"refund|return", f"{t['name']} {t.get('grain') or ''}", re.I)]
+    check("returns_fact_separate", bool(returns_facts) and len(facts) > len(returns_facts), f"returns facts: {returns_facts}")
+
+    # Guest checkouts have no customer, so no home store: the design must say what happens.
+    prose = _texts(record, "decisions", "requirements", "questions", "tables")
+    check("guest_checkouts_handled", bool(re.search(r"guest", prose, re.I)),
+          "guest checkouts addressed" if re.search(r"guest", prose, re.I) else "not addressed")
+    return checks
+
+
+GRADERS = {"northstar": grade_northstar, "northstar_structures": grade_structures}

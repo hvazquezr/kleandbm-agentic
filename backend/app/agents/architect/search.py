@@ -67,6 +67,19 @@ class Settings:
     eval_calls_per_level: int = 4
 
 
+def worst_case_model_calls(settings: Settings, stages: int) -> int:
+    """Model calls a search over `stages` stages can need: one generation call per expanded node
+    (the root, then up to `beam` per later level) and every evaluator turn at each level."""
+    return sum((1 if level == 0 else settings.beam) + settings.eval_calls_per_level for level in range(stages))
+
+
+def stages_that_fit(settings: Settings) -> int:
+    """How many stages a search can finish within its model-call budget. A search that runs out
+    ends partial and leaves a person a decision to make, so it isn't started."""
+    return max((n for n in range(len(STAGES) + 1) if worst_case_model_calls(settings, n) <= settings.max_model_calls),
+               default=0)
+
+
 @dataclass
 class Workspace:
     """A node's isolated copy of the candidate content; the design.* edit functions work on it."""
@@ -184,6 +197,30 @@ EVAL_TOOLS = [*at.SOURCE_TOOL_SPECS, SCORE_SPEC]
 
 # --- Helpers ------------------------------------------------------------------------------
 
+FINAL_TURN = ("This is your last turn for this stage: no more source checks. Call score_candidates now, "
+              "with one entry per candidate, from the evidence you have; count what you couldn't verify "
+              "in unverified_critical.")
+
+
+def _final_transcript(transcript: list) -> list:
+    """The evaluator's last turn at a level, as a fresh conversation: the brief, the source
+    checks already made with their results, and the instruction to score now. Fresh because
+    the tools change for this turn, and earlier thinking blocks are signed for the request that
+    produced them, so they can't be replayed with a different tool list (the API returns 400)."""
+    checks, calls = [], {}
+    for entry in transcript[1:]:
+        if entry["role"] == "assistant":
+            calls.update({c["id"]: c for c in entry["tool_calls"]})
+        elif entry["role"] == "tool":
+            for r in entry["results"]:
+                c = calls.get(r["id"], {})
+                checks.append({"tool": c.get("name"), "input": c.get("input"), "is_error": r["is_error"],
+                               "result": r["content"]})
+    text = transcript[0]["text"]
+    if checks:
+        text += "\n\n<source_checks>\n" + json.dumps(checks, indent=1, default=str) + "\n</source_checks>"
+    return [{"role": "user", "text": text + "\n\n" + FINAL_TURN}]
+
 
 def _key(name: str) -> str:
     return design._key(name)
@@ -228,11 +265,16 @@ def _rank_key(node: SearchNode) -> tuple:
 
 
 def apply_alternative(parent: Workspace, alt: dict[str, Any], scope: dict[str, Any],
-                      requirements: list[modeling.RecordView]) -> tuple[Workspace | None, str | None]:
+                      requirements: list[modeling.RecordView],
+                      root_tables: set[str] | None = None) -> tuple[Workspace | None, str | None]:
     """The child workspace for one alternative, or the reason it can't be built. Edits outside
-    the decision's affected elements are refused: the search is local."""
+    the decision's affected elements are refused: the search is local. Tables the branch added
+    at an earlier stage (in the parent but not in the design before the search, `root_tables`)
+    are part of its scope, so later stages can refine them."""
     ws = Workspace(copy.deepcopy(parent.content))
     allowed = _affected_tables(scope)
+    if root_tables is not None:
+        allowed |= {_key(t["name"]) for t in parent.content["tables"]} - root_tables
     req_ids = set(scope["requirement_ids"])
     by_code = {(r.code or "").lower(): str(r.id) for r in requirements if str(r.id) in req_ids}
     try:
@@ -291,6 +333,7 @@ class SearchState(TypedDict):
 
 
 def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trigger, question: str, why: str,
+               undecided: str = "",
                elements: list[str], requirement_ids: list[str], stages: list[str],
                alternatives: list[dict[str, str]], issue_key: str | None, settings: Settings,
                emit=lambda _: None) -> DecisionPoint:
@@ -302,7 +345,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
     stages = [s for s in STAGES if s in stages]
     budget = Budget(settings)
     scope = {"elements": elements, "requirement_ids": requirement_ids, "stages": stages, "issue_key": issue_key,
-             "why": why, "alternatives": alternatives, "base_seq": candidate.base_seq}
+             "why": why, "undecided": undecided, "alternatives": alternatives, "base_seq": candidate.base_seq}
 
     dp = DecisionPoint(tenant_id=scope_.tenant_id, project_id=scope_.project_id, model_id=candidate.model_id,
                        candidate_id=candidate.id, run_id=ctx.run.id, trigger=trigger, question=question,
@@ -321,6 +364,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
     # evaluate, even though it equals the root.
     seen: set[str] = set()
     tables = _affected_tables(scope)
+    root_tables = {_key(t["name"]) for t in root.content["tables"]}
     emit({"type": "search", "status": "started", "decision_point_id": str(dp.id), "question": question,
           "stages": stages})
 
@@ -347,7 +391,8 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
                 return {"stop": reason}
             parent = nodes[parent_id]
             brief = {
-                "decision_point": question, "trigger": str(trigger), "why": why, "stage": STAGE_LABELS[stage],
+                "decision_point": question, "trigger": str(trigger), "why": why, "undecided": undecided,
+                "stage": STAGE_LABELS[stage],
                 "decide_now": f"Stage {state['depth'] + 1} of {len(stages)}: {STAGE_LABELS[stage]}",
                 "affected_elements": elements,
                 "affected_requirements": [req_text.get(r, r) for r in requirement_ids],
@@ -365,7 +410,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
                               if c.name == "propose_alternatives"), [])
             parent_ws = Workspace(parent.content, parent.internal_checks)
             for alt in proposals[: settings.children]:
-                ws, problem = apply_alternative(parent_ws, alt, scope, requirements)
+                ws, problem = apply_alternative(parent_ws, alt, scope, requirements, root_tables)
                 node = SearchNode(
                     tenant_id=dp.tenant_id, project_id=dp.project_id, decision_point_id=dp.id, parent_id=parent.id,
                     depth=state["depth"] + 1, stage=stage, choice=str(alt.get("choice") or "(unnamed)")[:2000],
@@ -416,10 +461,14 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
         transcript = [{"role": "user", "text": "<evaluation_brief>\n" + json.dumps(brief, indent=1, default=str)
                        + "\n</evaluation_brief>"}]
         scored: dict[str, dict] = {}
-        for _ in range(settings.eval_calls_per_level):
+        turns = settings.eval_calls_per_level
+        for i in range(turns):
             if (reason := budget.exhausted()):
                 return {"stop": reason}
-            turn = call(EVALUATOR_PROMPT, transcript, EVAL_TOOLS)
+            if i == turns - 1:  # forced tool choice isn't available, so offer only the scoring tool
+                turn = call(EVALUATOR_PROMPT, _final_transcript(transcript), [SCORE_SPEC])
+            else:
+                turn = call(EVALUATOR_PROMPT, transcript, EVAL_TOOLS)
             transcript.append(turn.to_transcript())
             if not turn.tool_calls:
                 break
@@ -446,8 +495,12 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
             transcript.append({"role": "tool", "results": results})
             if scored:
                 break
+        unscored = (f"the evaluator left {{}} out of its scores" if scored
+                    else "the evaluator gave no scores")
         for label, n in labels.items():
             s = scored.get(label) or {}
+            if not s:
+                n.evaluation = {**n.evaluation, "unscored": unscored.format(label)}
             scores = {k: max(0, min(5, int(s.get(k) or 0))) for k in WEIGHTS}
             n.evaluation = {**n.evaluation, "scores": scores, "total": _total(scores) if s else 0.0,
                             "hard_violation": _none_if_empty(s.get("hard_violation")),
@@ -467,7 +520,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
             elif e.get("hard_violation"):
                 n.status, n.reason = NodeStatus.REJECTED, f"Hard constraint: {e['hard_violation']}"
             elif "scores" not in e or not e.get("total"):
-                n.status, n.reason = NodeStatus.PRUNED, "Not evaluated (budget or evaluator gave no score)"
+                n.status, n.reason = NodeStatus.PRUNED, f"Not evaluated: {e.get('unscored') or 'no score'}"
             elif e["total"] < settings.threshold:
                 n.status, n.reason = NodeStatus.PRUNED, f"Score {e['total']} below the threshold {settings.threshold}"
             else:
@@ -566,6 +619,8 @@ def _record_decision(ctx: at.ArchitectContext, dp: DecisionPoint, best: SearchNo
     else:
         statement = f"{dp.question} No alternative qualified; the design was left unchanged."
         rationale = f"Trigger: {dp.trigger.replace('_', ' ')}. Every alternative was rejected."
+    if undecided := dp.scope.get("undecided"):
+        rationale = f"{rationale} Searched because the evidence left open: {undecided}"
     reasons = "; ".join(f"{n.choice} ({n.reason})" for n in others if n.reason)[:5000]
     if reasons:
         rationale = f"{rationale} Not chosen: {reasons}"

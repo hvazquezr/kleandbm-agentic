@@ -207,17 +207,22 @@ DECISION_POINT_SPEC = ToolSpec(
     "ambiguous_relationship (evidence leaves a relationship pattern or cardinality uncertain), or "
     "multiple_remediations (a Validator failure has more than one viable fix; give its issue_key). Never for "
     "business meaning: ask_requirements instead. The search changes only the elements you name, writes the "
-    "chosen design into your candidate and records the decision. At most a couple per run.",
+    "chosen design into your candidate and records the decision. Only when the evidence doesn't settle the "
+    "choice; otherwise decide and record_decision.",
     _obj({
         "trigger": {"type": "string", "enum": ["grain_conflict", "competing_requirements", "ambiguous_relationship",
                                                "multiple_remediations"]},
         "question": {"type": "string", "description": "The design question, in one sentence"},
         "why": {"type": "string", "description": "The conflict and the evidence for it, citing evidence ids"},
+        "undecided": {"type": "string", "description":
+                      "What the evidence leaves open between the alternatives after your investigation. If you "
+                      "can say which is better and why, decide it yourself with record_decision instead."},
         "elements": {"type": "array", "items": {"type": "string"},
                      "description": "Affected elements ('table' or 'table.attribute'), including tables an alternative would add"},
         "requirement_ids": {"type": "array", "items": {"type": "string"}},
         "stages": {"type": "array", "items": {"type": "string", "enum": ["grain", "relationships", "measures"]},
-                   "description": "Which stages the decision affects; others are skipped"},
+                   "description": "Only the stages where the alternatives differ (often one); others are skipped. "
+                                  "The search budget limits how many fit."},
         "alternatives": {"type": "array", "items": _obj({"choice": {"type": "string"}, "rationale": {"type": "string"}})},
         "issue_key": _opt("For multiple_remediations: the Validator finding's issue key."),
     }),
@@ -500,9 +505,19 @@ def open_decision_point(ctx: ArchitectContext, args: dict) -> dict:
                     for a in args.get("alternatives") or [] if str(a.get("choice") or "").strip()]
     if not question or len(alternatives) < 2:
         raise ToolInputError("a decision point needs a question and at least two viable alternatives")
+    undecided = str(args.get("undecided") or "").strip()
+    if not undecided:
+        raise ToolInputError("say what the evidence leaves open between the alternatives (undecided); if it "
+                             "settles the choice, decide it yourself and record_decision")
     stages = [s for s in search.STAGES if s in (args.get("stages") or [])]
     if not stages:
         raise ToolInputError("name the stages the decision affects: grain, relationships, measures")
+    settings = ctx.tot_settings or search.Settings()
+    if (fits := search.stages_that_fit(settings)) < len(stages):
+        raise ToolInputError(
+            f"{len(stages)} stages can need {search.worst_case_model_calls(settings, len(stages))} model calls, but "
+            f"the search budget is {settings.max_model_calls}: name at most {fits}, only those where the "
+            "alternatives differ")
     elements = [str(e).strip() for e in args.get("elements") or [] if str(e).strip()]
     if not elements:
         raise ToolInputError("name the affected elements, so the search stays local")
@@ -517,9 +532,9 @@ def open_decision_point(ctx: ArchitectContext, args: dict) -> dict:
             raise ToolInputError("multiple_remediations needs the issue_key of a failed Validator finding")
     ctx.session.commit()  # the search commits its nodes as it goes
     dp = search.run_search(ctx, chat_model=ctx.chat_model, trigger=trigger, question=question,
-                           why=str(args.get("why") or "").strip(), elements=elements,
+                           why=str(args.get("why") or "").strip(), undecided=undecided, elements=elements,
                            requirement_ids=requirement_ids, stages=stages, alternatives=alternatives,
-                           issue_key=issue_key, settings=ctx.tot_settings or search.Settings(),
+                           issue_key=issue_key, settings=settings,
                            emit=ctx.emit or (lambda _: None))
     ctx.decision_points.append(str(dp.id))
     nodes = ctx.session.scalars(select(search.SearchNode).where(search.SearchNode.decision_point_id == dp.id)).all()

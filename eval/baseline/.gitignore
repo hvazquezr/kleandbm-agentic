@@ -1,3 +1,2 @@
-# Uploaded copies of scenario documents; the run JSON and reports are kept.
-results/*/objects/
+results/
 __pycache__/

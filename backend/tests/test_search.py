@@ -51,6 +51,7 @@ def decision_point(p, stages=("grain",), elements=("fact_store_profit", "fact_or
     return {"name": "open_decision_point", "input": {
         "trigger": trigger, "question": "How should profit be modelled when costs exist only by store and day?",
         "why": "Costs are in store_daily_costs (store x day x cost type); orders have no cost.",
+        "undecided": "Whether a daily or a coarser store grain serves the requirement better.",
         "elements": list(elements), "requirement_ids": [p.profit_req], "stages": list(stages),
         "alternatives": [{"choice": f"option {i}", "rationale": "viable"} for i in range(alternatives)],
         "issue_key": issue_key}}
@@ -162,7 +163,9 @@ def test_beam_pruning_threshold_and_tie_breaks_across_stages(proj, db_session_fa
 
 
 def test_a_budget_stop_applies_the_best_partial_and_blocks_readiness(proj, monkeypatch, db_session_factory):
-    monkeypatch.setattr(get_settings(), "tot_max_model_calls", 2)
+    # 20 output tokens per scripted call: the generation and one evaluation use it up before
+    # the second stage. (A model-call budget too small for the stages is refused up front.)
+    monkeypatch.setattr(get_settings(), "tot_max_output_tokens", 40)
     proj.script(
         *BASE,
         {"tool_calls": [decision_point(proj, stages=("grain", "measures"), elements=("fact_store_profit",))]},
@@ -173,7 +176,7 @@ def test_a_budget_stop_applies_the_best_partial_and_blocks_readiness(proj, monke
     done = proj.run()[-1]
     with db_session_factory() as s:
         dp = s.scalar(select(DecisionPoint))
-        assert dp.status == "partial" and dp.stop_reason == "model-call budget reached"
+        assert dp.status == "partial" and dp.stop_reason == "output-token budget reached"
     cand = proj.alice.get(f"{proj.base}/candidates/{done['candidate']['id']}").json()
     assert any(t["name"] == "fact_store_profit" for t in cand["content"]["tables"])
     assert any(b.startswith("decision point:") and "partial" in b for b in cand["blockers"])
@@ -256,6 +259,17 @@ def test_apply_alternative_keeps_the_search_local():
     ws, why = apply_alternative(parent, alt("add", tables=[STORE_DAY]), scope, [])
     assert why is None and parent.content == content  # the parent is untouched
     assert {t["name"] for t in ws.content["tables"]} == {"dim_store", "fact_store_profit"}
+    # A later stage of the same branch may refine the table it added; pre-existing ones stay fixed.
+    root = {"dim_store"}
+    refined = alt("refine", tables=[{**STORE_DAY, "description": "Refined at the next stage"}])
+    _, why = apply_alternative(ws, refined, scope, [])
+    assert "doesn't affect" in why  # without knowing the root, it looks out of scope
+    child, why = apply_alternative(ws, refined, scope, [], root)
+    assert why is None
+    assert next(t for t in child.content["tables"] if t["name"] == "fact_store_profit")["description"] == \
+        "Refined at the next stage"
+    _, why = apply_alternative(ws, alt("touch", tables=[{**DIM_STORE, "description": "x"}]), scope, [], root)
+    assert "doesn't affect" in why
 
 
 def test_only_the_beam_survives_a_level(proj, db_session_factory):
@@ -475,3 +489,86 @@ def test_only_an_unselected_search_can_be_decided(proj, monkeypatch):
 def uuid_of(s):
     import uuid
     return uuid.UUID(s)
+
+
+def test_the_evaluators_last_turn_at_a_level_can_only_score(proj, db_session_factory):
+    probe = {"tool_calls": [{"name": "source_candidate_key_check", "input": {
+        "source_id": proj.source, "table": "store_daily_costs", "columns": ["store_id", "cost_date"],
+        "purpose": "check the cost grain"}}]}
+    m = proj.script(
+        *BASE,
+        {"tool_calls": [decision_point(proj)]},
+        propose(alt("Store-day operating profit fact", tables=[STORE_DAY]),
+                alt("Store-month operating profit fact", tables=[{**STORE_DAY, "grain": "One row per store per month"}])),
+        probe, probe, probe,  # three probing turns use up all but the last evaluator turn
+        score(("C1", 4, "", 0)),  # C2 is left out of the scores
+        {"text": "Done."},
+    )
+    assert proj.run()[-1]["status"] == "completed"
+    evaluator = m.calls[4:8]
+    assert all("source_candidate_key_check" in c["tools"] for c in evaluator[:3])
+    # The last turn is a fresh conversation (earlier thinking is signed for the other tool
+    # list): the brief, the three checks with their results, and the instruction to score.
+    final = evaluator[3]
+    assert final["tools"] == ["score_candidates"]
+    [only] = final["transcript"]
+    assert only["role"] == "user" and "<evaluation_brief>" in only["text"] and "last turn" in only["text"]
+    assert only["text"].count('"tool": "source_candidate_key_check"') == 3
+    with db_session_factory() as s:
+        nodes = {n.choice: n for n in s.scalars(select(SearchNode).where(SearchNode.depth == 1))}
+        assert nodes["Store-day operating profit fact"].status == "selected"
+        assert nodes["Store-month operating profit fact"].reason == \
+            "Not evaluated: the evaluator left C2 out of its scores"
+
+
+def test_an_evaluator_that_gives_no_scores_says_so(proj, db_session_factory):
+    proj.script(
+        *BASE,
+        {"tool_calls": [decision_point(proj)]},
+        propose(alt("Store-day operating profit fact", tables=[STORE_DAY])),
+        {"text": "I can't score these."},
+        {"text": "Done."},
+    )
+    proj.run()
+    with db_session_factory() as s:
+        node = s.scalar(select(SearchNode).where(SearchNode.depth == 1))
+        assert node.reason == "Not evaluated: the evaluator gave no scores"
+        assert s.scalar(select(DecisionPoint)).status == "no_candidate"
+
+
+def test_a_search_needs_an_open_question_and_must_fit_its_budget(proj, monkeypatch, db_session_factory):
+    from app.agents.architect.search import Settings, stages_that_fit, worst_case_model_calls
+
+    # 1 generation + 4 evaluator turns, then 2 generations (beam) + 4 per later stage.
+    assert [worst_case_model_calls(Settings(), n) for n in (1, 2, 3)] == [5, 11, 17]
+    assert stages_that_fit(Settings()) == 2 and stages_that_fit(Settings(max_model_calls=17)) == 3
+    seen = {}
+
+    def keep(name):
+        def step(t):
+            seen[name] = _results(t)[-1]
+            return {"text": "ok"} if name == "fits" else {"tool_calls": [next_call[name]]}
+        return step
+
+    settled = decision_point(proj)
+    settled["input"]["undecided"] = " "
+    three = decision_point(proj, stages=("grain", "relationships", "measures"))
+    next_call = {"settled": three, "three": decision_point(proj, stages=("grain",))}
+    proj.script(
+        *BASE,
+        {"tool_calls": [settled]},
+        keep("settled"),
+        keep("three"),
+        propose(alt("Store-day operating profit fact", tables=[STORE_DAY])),
+        score(("C1", 4, "", 0)),
+        keep("fits"),
+    )
+    proj.run()
+    assert seen["settled"]["is_error"] and "record_decision" in seen["settled"]["content"]
+    assert seen["three"]["is_error"] and "17 model calls" in seen["three"]["content"] and "at most 2" in seen["three"]["content"]
+    assert not seen["fits"]["is_error"]
+    with db_session_factory() as s:
+        [dp] = s.scalars(select(DecisionPoint)).all()  # the refused calls opened nothing
+        assert dp.scope["undecided"].startswith("Whether a daily")
+    [decision] = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()["decisions"]
+    assert "Searched because the evidence left open: Whether a daily" in decision["data"]["rationale"]

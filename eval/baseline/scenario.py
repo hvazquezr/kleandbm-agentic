@@ -31,6 +31,25 @@ NORTHSTAR = Scenario(
     documents=[ROOT / "retail-discovery" / "northstar-current-state-report.xlsx"],
 )
 
+# The same source and workbook, with requirements that pull the structure in different
+# directions: two roles for the store, measures at order and at order-line grain, and a
+# requirement that would need an allocation nobody has agreed. These are technical conflicts,
+# where selective ToT should have something to search. The expected answers follow Kimball
+# and the no-fabrication rule (grade.grade_structures), not the Northstar answer key.
+STRUCTURES = Scenario(
+    name="northstar_structures",
+    requirements=[
+        "Monthly net sales by product category, both by the store where the order was placed "
+        "and by the customer's home store",
+        "Average order value and average shipping charged per order, by channel and month",
+        "Monthly shipping charged by product category",
+        "Monthly refund rate by product category: refunded amount as a share of net sales",
+    ],
+    documents=NORTHSTAR.documents,
+)
+
+SCENARIOS = {s.name: s for s in (NORTHSTAR, STRUCTURES)}
+
 FORBIDDEN = {"README.md", "verification.json"}
 
 

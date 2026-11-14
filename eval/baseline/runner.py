@@ -53,7 +53,7 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> 
     record: dict[str, Any] = {
         "ids": ids, "status": done.get("status"), "detail": done.get("detail"), "seconds": round(seconds, 1),
         "state": snap["state"]["effective_state"], "tables": tables,
-        "relationships": len(snap["relationships"]),
+        "relationships": [_relationship(r["data"], snap) for r in snap["relationships"]],
         "requirements": [{"code": r["code"], "statement": r["data"]["statement"],
                           "feasibility": r["data"].get("feasibility_status"), "notes": r["data"].get("feasibility_notes")}
                          for r in snap["requirements"]],
@@ -89,6 +89,14 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> 
     if run_id:
         record["usage"] = usage(user, base, run_id)
     return record
+
+
+def _relationship(data: dict[str, Any], snap: dict[str, Any]) -> dict[str, Any]:
+    tables = {t["id"]: t["data"]["name"] for t in snap["tables"]}
+    attrs = {a["id"]: a["data"]["name"] for a in snap["attributes"]}
+    return {"from_table": tables.get(data["from_table_id"]), "from_attribute": attrs.get(data["from_attribute_id"]),
+            "to_table": tables.get(data["to_table_id"]), "to_attribute": attrs.get(data["to_attribute_id"]),
+            "role_name": data.get("role_name")}
 
 
 TOKENS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
@@ -167,7 +175,8 @@ def summarize(records: list[dict[str, Any]], prices: dict[str, dict[str, float]]
 def report(summary: dict[str, Any], records: list[dict[str, Any]]) -> str:
     """A Markdown comparison: one column per variant, means over its runs."""
     variants = [v for v in VARIANTS if v in summary]
-    lines = ["# Baseline comparison: single candidate vs. selective ToT", ""]
+    names = sorted({r["scenario"] for r in records})
+    lines = [f"# Baseline comparison: single candidate vs. selective ToT ({', '.join(names)})", ""]
     lines += [f"Runs per variant: {', '.join(f'{v} {summary[v]['runs']}' for v in variants)}. "
               "Values are means over runs; rubric rows count the runs that passed. Rubric checks are "
               "keyword heuristics over the records (eval/baseline/grade.py), so check surprising rows in the run JSON.", ""]

@@ -1,6 +1,7 @@
 """Baseline runner: the Architect on Northstar with and without selective Tree of Thought.
 
     conda run -n kleandbm-agentic python eval/baseline/run.py --repeats 3
+    conda run -n kleandbm-agentic python eval/baseline/run.py --scenario northstar_structures --repeats 3
     conda run -n kleandbm-agentic python eval/baseline/run.py --variants tot --repeats 1 --prices prices.json
 
 Live and paid: every run calls the configured Architect, Business Requirements and Validator
@@ -11,7 +12,7 @@ KLEANDBM_OPENAI_API_KEY for the Validator. Runs go into their own database
 backend/scripts/init-eval-db.sql), never the dev or test database, so it can run while pytest
 does. Variants alternate (baseline, tot, baseline, ...) so drift over time affects both.
 
-Writes eval/baseline/results/<timestamp>/: one JSON per run (records, usage, decision points,
+Writes eval/baseline/results/<timestamp>-<scenario>/: one JSON per run (records, usage, decision points,
 rubric), summary.json and report.md. --prices takes {llm_model: {input, output, cache_read,
 cache_write}} in dollars per million tokens; without it, cost is left blank rather than guessed.
 """
@@ -49,6 +50,7 @@ def _northstar_password() -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--variants", default="baseline,tot", help="comma-separated: baseline, tot")
+    parser.add_argument("--scenario", default="northstar", help="northstar or northstar_structures")
     parser.add_argument("--repeats", type=int, default=1, help="runs per variant (LLM runs vary; 3+ to compare)")
     parser.add_argument("--prices", type=Path, help="JSON prices per model, dollars per million tokens")
     parser.add_argument("--out", type=Path, default=HERE / "results")
@@ -73,12 +75,14 @@ def main() -> int:
     from app.persistence.db import get_session
 
     import runner
-    from scenario import NORTHSTAR
+    from scenario import SCENARIOS
 
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     bad = [v for v in variants if v not in runner.VARIANTS]
-    if bad or args.repeats < 1:
-        parser.error(f"unknown variants {bad}" if bad else "--repeats must be at least 1")
+    if bad or args.repeats < 1 or args.scenario not in SCENARIOS:
+        parser.error(f"unknown variants {bad}" if bad else "--repeats must be at least 1" if args.repeats < 1
+                     else f"unknown scenario; use one of {sorted(SCENARIOS)}")
+    chosen = SCENARIOS[args.scenario]
     settings = get_settings()
     password = _northstar_password()
     missing = [name for name, ok in (("KLEANDBM_ANTHROPIC_API_KEY", settings.anthropic_api_key),
@@ -99,7 +103,7 @@ def main() -> int:
     engine = create_engine(url)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-    out = args.out / datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = args.out / f"{datetime.now():%Y%m%d-%H%M%S}-{chosen.name}"
     out.mkdir(parents=True)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     verifier = TokenVerifier(issuer=ISSUER, audience=AUDIENCE, key_resolver=lambda _t: key.public_key())
@@ -141,16 +145,16 @@ def main() -> int:
 
         if args.check:
             from scenario import set_up
-            ids = set_up(User(), NORTHSTAR, password)
+            ids = set_up(User(), chosen, password)
             print(f"Preflight OK: eval database migrated, Northstar source verified read-only and linked, "
-                  f"{len(NORTHSTAR.documents)} document(s) uploaded, {len(NORTHSTAR.requirements)} requirements "
+                  f"{len(chosen.documents)} document(s) uploaded, {len(chosen.requirements)} {chosen.name} requirements "
                   f"(project {ids['project']}). No agent was run.")
             return 0
         records = []
         plan = [v for _ in range(args.repeats) for v in variants]
         for i, variant in enumerate(plan, 1):
             print(f"[{i}/{len(plan)}] {variant} …", flush=True)
-            record = runner.run_once(User(), NORTHSTAR, variant, password, settings, fresh_user=User)
+            record = runner.run_once(User(), chosen, variant, password, settings, fresh_user=User)
             records.append(record)
             (out / f"run-{i:02d}-{variant}.json").write_text(json.dumps(record, indent=1, default=str))
             passed = sum(g["passed"] for g in record["grade"].values())

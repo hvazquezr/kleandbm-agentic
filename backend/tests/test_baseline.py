@@ -129,3 +129,68 @@ def test_cost_needs_a_price_for_every_model():
     prices = {"a": {"input": 2.0, "output": 10.0}, "v": {"output": 4.0}}
     assert runner.cost(rec, prices) == 7.0
     assert runner.cost(rec, {"a": prices["a"]}) is None and runner.cost(rec, None) is None
+
+
+def _structures(**over):
+    fk = lambda *names: [*names]  # noqa: E731
+    r = {
+        "scenario": "northstar_structures",
+        "tables": [
+            {"name": "fact_sales_line", "kind": "fact", "grain": "One row per order line", "source_ref": "order_lines",
+             "description": "", "attributes": fk("order_store_key", "home_store_key", "net_sales_amount")},
+            {"name": "fact_order", "kind": "fact", "grain": "One row per order", "source_ref": "orders",
+             "description": "", "attributes": fk("store_key", "order_value", "shipping_amount")},
+            {"name": "fact_refund", "kind": "fact", "grain": "One row per refund event", "source_ref": "refunds",
+             "description": "", "attributes": fk("refund_amount")},
+            {"name": "dim_store", "kind": "dimension", "grain": "", "source_ref": "stores", "description": "",
+             "attributes": fk("store_key")},
+        ],
+        "relationships": [
+            {"from_table": "fact_sales_line", "from_attribute": "order_store_key", "to_table": "dim_store",
+             "to_attribute": "store_key", "role_name": "Order store"},
+            {"from_table": "fact_sales_line", "from_attribute": "home_store_key", "to_table": "dim_store",
+             "to_attribute": "store_key", "role_name": "Home store"},
+        ],
+        "requirements": [
+            {"statement": scenario.STRUCTURES.requirements[0], "feasibility": "fully_supported",
+             "notes": "Guest checkouts map to an Unknown home store."},
+            {"statement": scenario.STRUCTURES.requirements[1], "feasibility": "fully_supported", "notes": ""},
+            {"statement": scenario.STRUCTURES.requirements[2], "feasibility": "unsupported",
+             "notes": "Shipping is charged per order; splitting it by category needs an agreed rule."},
+            {"statement": scenario.STRUCTURES.requirements[3], "feasibility": "fully_supported", "notes": ""},
+        ],
+        "questions": [], "decisions": [],
+    }
+    r.update(over)
+    return r
+
+
+def test_the_structures_rubric_wants_store_roles_and_order_grain_shipping():
+    good = grade.grade(_structures())
+    assert "profit_by_order_honest" not in good  # graded by its own rubric
+    assert all(c["passed"] for c in good.values()), {k: v for k, v in good.items() if not v["passed"]}
+
+    rec = _structures(relationships=[_structures()["relationships"][0]])
+    rec["tables"] = [{**t, "attributes": ["order_store_key", "net_sales_amount", "allocated_shipping"]}
+                     if t["name"] == "fact_sales_line"
+                     else t for t in rec["tables"] if t["name"] != "fact_order"]
+    rec["requirements"][2]["feasibility"] = "fully_supported"
+    bad = grade.grade(rec)
+    for name in ("store_roles_distinguished", "no_order_measures_on_lines", "order_grain_fact_for_order_measures",
+                 "shipping_by_category_honest"):
+        assert not bad[name]["passed"], name
+    # A home store reached through the customer counts as the second role too.
+    via_customer = _structures(relationships=[], tables=[*_structures()["tables"], {
+        "name": "dim_customer", "kind": "dimension", "grain": "", "source_ref": "customers", "description": "",
+        "attributes": ["customer_key", "home_store_name"]}])
+    assert grade.grade(via_customer)["store_roles_distinguished"]["passed"]
+
+
+def test_a_run_is_graded_by_its_scenario(as_user, eval_client):
+    eval_client["architect"] = ScriptedChatModel(list(STEPS))
+    r = runner.run_once(as_user("auth0|eval"), scenario.STRUCTURES, "baseline", "x", get_settings())
+    assert r["scenario"] == "northstar_structures" and "store_roles_distinguished" in r["grade"]
+    assert {q["statement"] for q in r["requirements"]} == set(scenario.STRUCTURES.requirements)
+    assert r["relationships"] == [{"from_table": "fact_sales", "from_attribute": "store_key", "to_table": "dim_store",
+                                   "to_attribute": "store_key", "role_name": None}]
+    assert "northstar_structures" in runner.report(runner.summarize([r]), [r])
