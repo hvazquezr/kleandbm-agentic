@@ -30,6 +30,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BACKEND = ROOT / "backend"
 sys.path[:0] = [str(HERE), str(BACKEND)]
+STARTED_IN = Path.cwd()  # relative paths on the command line mean this directory
 os.chdir(BACKEND)  # settings read backend/.env
 
 ISSUER = "https://eval.kleandbm.local/"
@@ -47,6 +48,28 @@ def _source_password(name: str) -> str | None:
     return None
 
 
+def _regrade(folder: Path, prices) -> int:
+    import grade
+    import runner
+
+    records = []
+    for f in sorted(folder.glob("run-*.json")):
+        record = json.loads(f.read_text())
+        before = sum(g["passed"] for g in record["grade"].values())
+        record["grade"] = grade.grade(record)
+        f.write_text(json.dumps(record, indent=1, default=str))
+        records.append(record)
+        print(f"{f.name}: rubric {before} -> {sum(g['passed'] for g in record['grade'].values())}/{len(record['grade'])}")
+    if not records:
+        print(f"No run JSON in {folder}", file=sys.stderr)
+        return 2
+    summary = runner.summarize(records, prices)
+    (folder / "summary.json").write_text(json.dumps(summary, indent=1))
+    (folder / "report.md").write_text(runner.report(summary, records))
+    print(f"Rewrote {folder / 'report.md'}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--variants", default="baseline,tot", help="comma-separated: baseline, tot")
@@ -56,7 +79,15 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=HERE / "results")
     parser.add_argument("--check", action="store_true",
                         help="set the scenario up once (database, source, documents) and stop before any agent runs")
+    parser.add_argument("--regrade", type=Path, metavar="RESULTS_DIR",
+                        help="re-grade a results folder's run JSON with the current rubric and rewrite its summary and "
+                             "report (no agent runs, no database)")
     args = parser.parse_args()
+    for name in ("prices", "out", "regrade"):
+        if (value := getattr(args, name)) is not None and not value.is_absolute():
+            setattr(args, name, STARTED_IN / value)
+    if args.regrade:
+        return _regrade(args.regrade, json.loads(args.prices.read_text()) if args.prices else None)
 
     import jwt
     from alembic import command

@@ -240,6 +240,11 @@ def test_the_meridian_rubric_catches_the_single_design_traps():
     for name in ("shipped_sales_from_shipped_quantity", "no_shipment_attributes_on_orders_or_lines",
                  "stock_semi_additive", "inventory_reruns_handled", "open_lines_handled"):
         assert not bad[name]["passed"], name
+    # Seen live: open lines acknowledged as lines with no shipment, without saying "backorder".
+    phrased = _meridian()
+    phrased["requirements"][3].update(feasibility="fully_supported",
+                                      notes="107 lines have no shipment (open or cancelled); only fully shipped lines count.")
+    assert grade.grade(phrased)["open_lines_handled"]["passed"]
     order_dc = _meridian(tables=[*_meridian()["tables"], {
         "name": "fact_order", "kind": "fact", "grain": "One row per order", "source_ref": "", "description": "",
         "attributes": ["dc_key"], "attribute_details": [{"name": "dc_key", "role": "foreign_key"}]}])

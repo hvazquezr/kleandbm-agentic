@@ -154,7 +154,8 @@ SHIP_EVENT = re.compile(r"ship(ped)?_?(date|at|month)|carrier|shipment_(id|key|n
 INVENTORY = re.compile(r"inventory|stock|on_?hand", re.I)
 RERUN = re.compile(r"re-?runs?\b|\bruns?\b|recount|run_(id|key)|captured_at|supersed", re.I)
 OPEN_LINES = re.compile(r"backorder|unshipped|not (yet )?(fully )?shipped|open (order )?lines?|partially shipped|"
-                        r"outstanding|still open", re.I)
+                        r"outstanding|still open|no shipments?\b|without (a )?shipments?|never shipped|"
+                        r"(open|unfilled|incomplete) (or cancelled )?(orders?|lines?)|lines? (in|on) open", re.I)
 
 
 def _details(t: dict[str, Any]) -> list[dict[str, Any]]:
