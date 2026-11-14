@@ -36,13 +36,13 @@ ISSUER = "https://eval.kleandbm.local/"
 AUDIENCE = "https://api.kleandbm.eval"
 
 
-def _northstar_password() -> str | None:
-    if value := os.environ.get("KLEANDBM_DEV_NORTHSTAR_PASSWORD"):
+def _source_password(name: str) -> str | None:
+    if value := os.environ.get(name):
         return value
     env = BACKEND / ".env"
     if env.exists():
         for line in env.read_text().splitlines():
-            if line.startswith("KLEANDBM_DEV_NORTHSTAR_PASSWORD="):
+            if line.startswith(f"{name}="):
                 return line.split("=", 1)[1].strip()
     return None
 
@@ -50,7 +50,7 @@ def _northstar_password() -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--variants", default="baseline,tot", help="comma-separated: baseline, tot")
-    parser.add_argument("--scenario", default="northstar", help="northstar or northstar_structures")
+    parser.add_argument("--scenario", default="northstar", help="northstar, northstar_structures or meridian")
     parser.add_argument("--repeats", type=int, default=1, help="runs per variant (LLM runs vary; 3+ to compare)")
     parser.add_argument("--prices", type=Path, help="JSON prices per model, dollars per million tokens")
     parser.add_argument("--out", type=Path, default=HERE / "results")
@@ -84,9 +84,9 @@ def main() -> int:
                      else f"unknown scenario; use one of {sorted(SCENARIOS)}")
     chosen = SCENARIOS[args.scenario]
     settings = get_settings()
-    password = _northstar_password()
+    password = _source_password(chosen.password_env)
     missing = [name for name, ok in (("KLEANDBM_ANTHROPIC_API_KEY", settings.anthropic_api_key),
-                                     ("the Northstar source password (eval/northstar/load.sh)", password)) if not ok]
+                                     (f"the {chosen.database} source password ({chosen.password_env}; see eval/*/load.sh)", password)) if not ok]
     if missing:
         print(f"Missing: {', '.join(missing)}", file=sys.stderr)
         return 2
@@ -146,7 +146,7 @@ def main() -> int:
         if args.check:
             from scenario import set_up
             ids = set_up(User(), chosen, password)
-            print(f"Preflight OK: eval database migrated, Northstar source verified read-only and linked, "
+            print(f"Preflight OK: eval database migrated, {chosen.database} source verified read-only and linked, "
                   f"{len(chosen.documents)} document(s) uploaded, {len(chosen.requirements)} {chosen.name} requirements "
                   f"(project {ids['project']}). No agent was run.")
             return 0

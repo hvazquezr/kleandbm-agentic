@@ -194,3 +194,62 @@ def test_a_run_is_graded_by_its_scenario(as_user, eval_client):
     assert r["relationships"] == [{"from_table": "fact_sales", "from_attribute": "store_key", "to_table": "dim_store",
                                    "to_attribute": "store_key", "role_name": None}]
     assert "northstar_structures" in runner.report(runner.summarize([r]), [r])
+
+
+def _meridian(**over):
+    def a(name, role="measure", additivity="additive", source_ref="", description=""):
+        return {"name": name, "role": role, "additivity": additivity, "source_ref": source_ref, "description": description}
+
+    def table(name, grain, *attrs, kind="fact", description=""):
+        return {"name": name, "kind": kind, "grain": grain, "source_ref": "", "description": description,
+                "attributes": [x["name"] for x in attrs], "attribute_details": list(attrs)}
+
+    r = {
+        "scenario": "meridian",
+        "tables": [
+            table("fact_order_line", "One row per order line", a("net_sales_amount"),
+                  a("final_ship_date_key", "foreign_key", "none"), a("dc_key", "foreign_key", "none")),
+            table("fact_shipment_line", "One row per shipment and order line", a("quantity_shipped"),
+                  a("shipped_net_sales_amount", source_ref="shipment_lines.quantity_shipped × (unit_price − discount_per_unit)"),
+                  a("dc_key", "foreign_key", "none"), a("ship_date_key", "foreign_key", "none")),
+            table("fact_inventory_daily", "One row per DC, product and snapshot date (latest count run only)",
+                  a("units_on_hand", additivity="semi_additive")),
+        ],
+        "relationships": [],
+        "requirements": [{"statement": s, "feasibility": "fully_supported", "notes": ""}
+                         for s in scenario.MERIDIAN.requirements],
+        "questions": [], "decisions": [],
+    }
+    r["requirements"][3].update(feasibility="partially_supported", notes="Only fully shipped lines; 41 are backordered.")
+    r.update(over)
+    return r
+
+
+def test_the_meridian_rubric_catches_the_single_design_traps():
+    good = grade.grade(_meridian())
+    assert all(c["passed"] for c in good.values()), {k: v for k, v in good.items() if not v["passed"]}
+
+    naive = _meridian()
+    line, ship, inv = naive["tables"]
+    ship["attribute_details"][1]["source_ref"] = "order_lines.quantity × unit_price"  # the fan-out
+    line["attribute_details"].append({"name": "ship_date_key", "role": "foreign_key", "additivity": "none"})
+    inv["grain"] = "One row per DC, product and date"
+    inv["attribute_details"][0]["additivity"] = "additive"
+    naive["requirements"][3].update(feasibility="fully_supported", notes="")
+    bad = grade.grade(naive)
+    for name in ("shipped_sales_from_shipped_quantity", "no_shipment_attributes_on_orders_or_lines",
+                 "stock_semi_additive", "inventory_reruns_handled", "open_lines_handled"):
+        assert not bad[name]["passed"], name
+    order_dc = _meridian(tables=[*_meridian()["tables"], {
+        "name": "fact_order", "kind": "fact", "grain": "One row per order", "source_ref": "", "description": "",
+        "attributes": ["dc_key"], "attribute_details": [{"name": "dc_key", "role": "foreign_key"}]}])
+    assert not grade.grade(order_dc)["no_shipment_attributes_on_orders_or_lines"]["passed"]
+
+
+def test_meridian_uploads_only_the_notes():
+    assert [d.name for d in scenario.MERIDIAN.documents] == ["meridian-ops-notes.md"]
+    assert scenario.MERIDIAN.password_env == "KLEANDBM_DEV_MERIDIAN_PASSWORD"
+    leaky = scenario.Scenario(name="leaky", requirements=["x"],
+                              documents=[scenario.ROOT / "eval" / "meridian" / "README.md"])
+    with pytest.raises(ValueError, match="grader-side only"):
+        scenario.set_up(None, leaky, "x")

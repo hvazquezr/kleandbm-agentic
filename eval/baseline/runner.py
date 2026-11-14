@@ -49,7 +49,10 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> 
     for t in snap["tables"]:
         tables.append({"name": t["data"]["name"], "kind": t["data"]["kind"], "grain": t["data"].get("grain"),
                        "source_ref": t["data"].get("source_ref"), "description": t["data"].get("description"),
-                       "attributes": [a["data"]["name"] for a in snap["attributes"] if a["data"]["table_id"] == t["id"]]})
+                       "attributes": [a["data"]["name"] for a in snap["attributes"] if a["data"]["table_id"] == t["id"]],
+                       "attribute_details": [
+                           {k: a["data"].get(k) for k in ("name", "role", "additivity", "source_ref", "description")}
+                           for a in snap["attributes"] if a["data"]["table_id"] == t["id"]]})
     record: dict[str, Any] = {
         "ids": ids, "status": done.get("status"), "detail": done.get("detail"), "seconds": round(seconds, 1),
         "state": snap["state"]["effective_state"], "tables": tables,

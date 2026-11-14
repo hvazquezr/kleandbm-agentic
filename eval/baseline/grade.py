@@ -2,7 +2,8 @@
 
 grade_northstar follows eval/northstar/README.md (the answer key, grader-side only);
 grade_structures follows Kimball and the no-fabrication rule for the northstar_structures
-requirements (eval/baseline/scenario.py). They are
+requirements (eval/baseline/scenario.py); grade_meridian follows eval/meridian/README.md (that
+scenario's answer key, grader-side only). They are
 keyword heuristics over the run's records, not a judgment of the design: they flag what to
 look at, and the run JSON holds everything needed to check a verdict by hand.
 """
@@ -145,4 +146,80 @@ def grade_structures(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return checks
 
 
-GRADERS = {"northstar": grade_northstar, "northstar_structures": grade_structures}
+SHIPMENT_GRAIN = re.compile(r"shipment", re.I)
+MONEY = re.compile(r"amount|sales|revenue|\bnet\b|net_", re.I)
+SHIPPED_QTY = re.compile(r"quantity_shipped|shipped[ _]quantity|qty_shipped|shipped_qty|shipped[ _]units", re.I)
+MILESTONE = re.compile(r"first|final|last|latest|promised|count|days|quantity|qty|units", re.I)
+SHIP_EVENT = re.compile(r"ship(ped)?_?(date|at|month)|carrier|shipment_(id|key|number)", re.I)
+INVENTORY = re.compile(r"inventory|stock|on_?hand", re.I)
+RERUN = re.compile(r"re-?runs?\b|\bruns?\b|recount|run_(id|key)|captured_at|supersed", re.I)
+OPEN_LINES = re.compile(r"backorder|unshipped|not (yet )?(fully )?shipped|open (order )?lines?|partially shipped|"
+                        r"outstanding|still open", re.I)
+
+
+def _details(t: dict[str, Any]) -> list[dict[str, Any]]:
+    return t.get("attribute_details") or [{"name": a} for a in t["attributes"]]
+
+
+def _says(a: dict[str, Any], pattern: re.Pattern) -> bool:
+    return bool(pattern.search(" ".join(str(a.get(k) or "") for k in ("name", "source_ref", "description"))))
+
+
+def grade_meridian(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    checks, check = _checker()
+    facts = _facts(record, check)
+    grain = lambda t: t.get("grain") or ""  # noqa: E731
+
+    shipment_facts = [t for t in facts if SHIPMENT_GRAIN.search(grain(t))]
+    check("shipment_grain_fact", bool(shipment_facts), f"shipment-grain facts: {[t['name'] for t in shipment_facts]}")
+
+    # Shipped sales from the shipped quantity: the order-line amount joined to shipment lines
+    # repeats split lines (+14.5% on this data).
+    shipped = [f"{t['name']}.{a['name']}" for t in shipment_facts for a in _details(t)
+               if MONEY.search(a["name"]) and _says(a, SHIPPED_QTY)]
+    check("shipped_sales_from_shipped_quantity", bool(shipped), f"shipped money measures citing the shipped quantity: {shipped}")
+
+    # A line can ship on several days: a ship date on the order-line fact (other than a
+    # milestone such as first or final ship date) picks one of them.
+    line_facts = [t for t in facts if LINE_GRAIN.search(grain(t)) and not SHIPMENT_GRAIN.search(grain(t))]
+    on_lines = [f"{t['name']}.{a['name']}" for t in line_facts for a in _details(t)
+                if SHIP_EVENT.search(a["name"]) and not MILESTONE.search(a["name"])]
+    order_facts = [t for t in facts if ORDER_GRAIN.search(grain(t)) and not LINE_GRAIN.search(grain(t))
+                   and not SHIPMENT_GRAIN.search(grain(t))]
+    on_orders = [f"{t['name']}.{a['name']}" for t in order_facts for a in _details(t)
+                 if re.search(r"\bdc|_dc|dc_|distribution|warehouse", a["name"], re.I)]
+    check("no_shipment_attributes_on_orders_or_lines", not on_lines and not on_orders,
+          f"ship events on order-line facts: {on_lines}; DC on order facts: {on_orders}")
+
+    req4 = _requirement(record, "Average days from order to final shipment")
+    prose = _texts(record, "decisions", "requirements", "questions", "tables")
+    open_ok = (req4 is not None and req4["feasibility"] == "partially_supported") or bool(OPEN_LINES.search(prose))
+    check("open_lines_handled", open_ok,
+          f"requirement 4 {req4['feasibility'] if req4 else 'missing'}; open lines "
+          f"{'mentioned' if OPEN_LINES.search(prose) else 'not mentioned'}")
+
+    stock = [(t, a) for t in facts for a in _details(t) if re.search(r"on_?hand|stock", a["name"], re.I)
+             and (a.get("role") in (None, "measure"))]
+    additivity = {f"{t['name']}.{a['name']}": a.get("additivity") for t, a in stock}
+    check("stock_semi_additive", bool(stock) and all(v == "semi_additive" for v in additivity.values()),
+          f"stock measures: {additivity}")
+
+    # Six dates have two count runs: (DC, product, date) isn't unique and month-end doubles
+    # unless the grain has the run or only the latest run is kept.
+    inv = [t for t in facts if INVENTORY.search(f"{t['name']} {grain(t)} {t.get('source_ref') or ''}")]
+    rerun = [t["name"] for t in inv if RERUN.search(f"{grain(t)} {t.get('description') or ''} "
+                                                     + " ".join(a["name"] for a in _details(t)))]
+    check("inventory_reruns_handled", bool(rerun) or bool(RERUN.search(_texts(record, "decisions", "requirements"))),
+          f"inventory facts handling runs: {rerun}" if rerun else
+          ("handled in the registers" if RERUN.search(_texts(record, "decisions", "requirements")) else "not found"))
+
+    for name, phrase in (("net_sales_feasible", "Monthly net sales by product category"),
+                         ("shipped_sales_feasible", "Monthly shipped net sales"),
+                         ("on_time_feasible", "On-time shipping rate"),
+                         ("month_end_stock_feasible", "Month-end units on hand")):
+        r = _requirement(record, phrase)
+        check(name, r is not None and r["feasibility"] in FEASIBLE, f"feasibility {r['feasibility'] if r else 'missing'}")
+    return checks
+
+
+GRADERS = {"northstar": grade_northstar, "northstar_structures": grade_structures, "meridian": grade_meridian}

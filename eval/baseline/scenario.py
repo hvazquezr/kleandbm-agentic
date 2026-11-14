@@ -7,7 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+CONTENT_TYPES = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                 ".md": "text/markdown", ".txt": "text/plain", ".pdf": "application/pdf"}
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Scenario:
     database: str = "northstar_ops"
     username: str = "northstar_ro"
     prompt: str = "Design the model."
+    password_env: str = "KLEANDBM_DEV_NORTHSTAR_PASSWORD"  # in the environment or backend/.env
 
 
 NORTHSTAR = Scenario(
@@ -48,7 +50,26 @@ STRUCTURES = Scenario(
     documents=NORTHSTAR.documents,
 )
 
-SCENARIOS = {s.name: s for s in (NORTHSTAR, STRUCTURES)}
+# A different source (eval/meridian, answer key in its README.md) where the obvious single design
+# goes wrong: split and multi-DC shipments, backorders, and re-run inventory counts. Measures are
+# defined in the notes, so the conflicts are technical.
+MERIDIAN = Scenario(
+    name="meridian",
+    requirements=[
+        "Monthly net sales by product category and order month",
+        "Monthly shipped net sales by distribution center and product category, by ship month",
+        "On-time shipping rate by distribution center and month: the share of shipped units that left on "
+        "or before the order's promised ship date",
+        "Average days from order to final shipment for each order line, by product category",
+        "Month-end units on hand by distribution center and product category",
+    ],
+    documents=[ROOT / "eval" / "meridian" / "meridian-ops-notes.md"],
+    database="meridian_ops",
+    username="meridian_ro",
+    password_env="KLEANDBM_DEV_MERIDIAN_PASSWORD",
+)
+
+SCENARIOS = {s.name: s for s in (NORTHSTAR, STRUCTURES, MERIDIAN)}
 
 FORBIDDEN = {"README.md", "verification.json"}
 
@@ -69,7 +90,7 @@ def set_up(user, scenario: Scenario, password: str, *, host: str = "127.0.0.1", 
     r = user.put(f"{base}/models/{model}/sources/{source}")
     assert r.status_code == 204, r.text
     for doc in scenario.documents:
-        _ok(user.post(f"{base}/documents", files={"file": (doc.name, doc.read_bytes(), XLSX)}))
+        _ok(user.post(f"{base}/documents", files={"file": (doc.name, doc.read_bytes(), CONTENT_TYPES[doc.suffix])}))
     _ok(user.post(f"{base}/changesets", json={"operations": [
         {"op": "create", "type": "requirement", "data": {"statement": s, "origin_kind": "user_statement"}}
         for s in scenario.requirements]}))
