@@ -73,11 +73,21 @@ class Position(BaseModel):
     y: float
 
 
+class StateEventOut(BaseModel):
+    state: ModelState
+    seq: int | None
+    actor_kind: str
+    by_name: str | None
+    note: str | None
+    at: datetime
+
+
 class StateOut(BaseModel):
     recorded_state: ModelState
     recorded_at_seq: int | None
     effective_state: ModelState
     changed_since_state: bool
+    last_event: StateEventOut | None = None
 
 
 class SnapshotOut(BaseModel):
@@ -191,7 +201,13 @@ def _state_out(state: modeling.ModelStateView) -> StateOut:
         recorded_at_seq=state.recorded_at_seq,
         effective_state=state.effective_state,
         changed_since_state=state.changed_since_state,
+        last_event=_event_out(state.last_event) if state.last_event else None,
     )
+
+
+def _event_out(e: modeling.StateEventView) -> StateEventOut:
+    return StateEventOut(state=e.state, seq=e.seq, actor_kind=e.actor_kind.value, by_name=e.by_name,
+                         note=e.note, at=e.at)
 
 
 # --- Routes ---------------------------------------------------------------------------------
@@ -292,6 +308,11 @@ def create_version(
 def get_state(model_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> StateOut:
     modeling.get_model(session, scope, model_id)
     return _state_out(modeling.get_state(session, scope, model_id))
+
+
+@router.get("/models/{model_id}/state/history")
+def get_state_history(model_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[StateEventOut]:
+    return [_event_out(e) for e in modeling.state_history(session, scope, model_id)]
 
 
 @router.post("/models/{model_id}/state")

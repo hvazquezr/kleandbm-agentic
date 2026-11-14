@@ -61,6 +61,16 @@ def get_or_create_user(
         )
         session.add(user)
         session.flush()
+    else:
+        # Keep the profile current with the identity provider, but never blank it: a token
+        # without the profile claims leaves what's stored.
+        changed = False
+        if display_name and user.display_name != display_name:
+            user.display_name, changed = display_name, True
+        if email and user.email != email:
+            user.email, changed = email, True
+        if changed:
+            session.flush()
     return user
 
 

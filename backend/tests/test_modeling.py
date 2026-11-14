@@ -242,7 +242,7 @@ def test_named_versions_label_watermarks(proj):
     assert [v["name"] for v in proj.alice.get(vurl).json()] == ["First draft"]
 
 
-def test_acceptance_needs_approval_and_lapses_on_change(proj, as_user):
+def test_acceptance_needs_approval_and_lapses_on_change(proj, as_user, client, make_token):
     carol = as_user("auth0|carol")
     proj.alice.put(f"/tenants/{proj.tenant}/members/{carol.id}", json={"role": "member"})
     proj.alice.put(f"{proj.base}/members/{carol.id}", json={"role": "editor"})
@@ -254,9 +254,22 @@ def test_acceptance_needs_approval_and_lapses_on_change(proj, as_user):
     denied = carol.post(surl, json={"state": "accepted"})
     assert denied.status_code == 403 and denied.json()["required_permission"] == "project:approve"
 
+    # Alice's profile arrives in her token's namespaced claims (an Auth0 Action adds them).
+    profile = {"https://kleandbm.ai/name": "Alice Analyst", "https://kleandbm.ai/email": "alice@example.com"}
+    assert client.get("/me", headers={"Authorization": f"Bearer {make_token('auth0|alice', **profile)}"}).status_code == 200
+
     accepted = proj.alice.post(surl, json={"state": "accepted", "note": "Approved for build"}).json()
+    event = accepted.pop("last_event")
     assert accepted == {"recorded_state": "accepted", "recorded_at_seq": 1,
                         "effective_state": "accepted", "changed_since_state": False}
+    assert (event["state"], event["seq"], event["actor_kind"], event["by_name"], event["note"]) == (
+        "accepted", 1, "user", "Alice Analyst", "Approved for build")
+
+    # Who did what is kept for every transition, newest first. Carol's token has no profile.
+    history = proj.alice.get(f"{surl}/history").json()
+    assert [(e["state"], e["by_name"]) for e in history] == [("accepted", "Alice Analyst"), ("ready_for_review", None)]
+    # A later token without the profile claims doesn't blank the stored name.
+    assert proj.alice.get(surl).json()["last_event"]["by_name"] == "Alice Analyst"
 
     # A register change counts too: definitions can invalidate an accepted model.
     proj.cs(carol, [{"op": "create", "type": "definition", "data": {"term": "Customer", "provenance": "inferred"}}], model_id=None)
@@ -283,6 +296,9 @@ def test_modeling_is_tenant_and_role_scoped(proj, as_user):
         {"op": "create", "type": "attribute", "data": {"table_id": created["fact"], "name": "x", "logical_type": "text"}}]})
     assert foreign_ref.status_code == 409 and "unknown record" in foreign_ref.json()["detail"]
     foreign_model = bob.post(f"/tenants/{tb}/projects/{pb}/changesets", json={"model_id": proj.model, "operations": star_schema_ops()})
+    # The lifecycle history (who accepted) is scoped like everything else, including mixed ids.
+    assert bob.get(f"{proj.base}/models/{proj.model}/state/history").status_code == 404
+    assert bob.get(f"/tenants/{tb}/projects/{pb}/models/{proj.model}/state/history").status_code == 404
     assert foreign_model.status_code == 404
     assert bob.get(f"/tenants/{tb}/projects/{pb}/records/{created['fact']}/history").status_code == 404
 

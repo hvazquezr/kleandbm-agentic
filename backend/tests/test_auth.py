@@ -12,6 +12,14 @@ def test_valid_token_yields_identity_and_permissions(verifier, make_token):
     assert "models:read" in claims.permissions
 
 
+def test_profile_comes_from_namespaced_or_plain_claims(verifier, make_token):
+    namespaced = verifier.verify(make_token("auth0|a", **{"https://kleandbm.ai/name": " Ana ", "https://kleandbm.ai/email": "ana@example.com"}))
+    assert (namespaced.name, namespaced.email) == ("Ana", "ana@example.com")
+    plain = verifier.verify(make_token("auth0|b", name="Ben", email="ben@example.com"))
+    assert (plain.name, plain.email) == ("Ben", "ben@example.com")
+    assert verifier.verify(make_token("auth0|c", **{"https://kleandbm.ai/name": 42})).name is None
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

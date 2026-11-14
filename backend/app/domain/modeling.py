@@ -5,6 +5,7 @@ new per-project seq. Reads take an optional ``as_of`` seq and return the state a
 watermark (spec §7, "Version history mechanism").
 """
 
+import datetime as dt
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ from app.persistence.modeling import (
     Record,
     RecordLink,
 )
+from app.persistence.models import User
 
 
 class StaleUpdate(Exception):
@@ -119,12 +121,27 @@ class LinkView:
 
 
 @dataclass(frozen=True)
+class StateEventView:
+    """One lifecycle transition and who made it (spec: acceptance is recorded against a version)."""
+
+    state: ModelState
+    seq: int | None
+    actor_kind: ActorKind
+    # The person: the user who made it, or the user an agent acted for. None if no name is known.
+    by_name: str | None
+    note: str | None
+    at: dt.datetime
+
+
+@dataclass(frozen=True)
 class ModelStateView:
     recorded_state: ModelState
     recorded_at_seq: int | None
     # Draft whenever structural changes landed after a Ready for Review or Accepted event.
     effective_state: ModelState
     changed_since_state: bool
+    # The latest transition, with who made it; None while the model has never left Draft.
+    last_event: StateEventView | None = None
 
 
 @dataclass(frozen=True)
@@ -1003,4 +1020,29 @@ def get_state(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> Mod
         )
     )
     effective = ModelState.DRAFT if changed else event.state
-    return ModelStateView(event.state, event.seq, effective, changed)
+    return ModelStateView(event.state, event.seq, effective, changed, _event_view(session, event))
+
+
+def state_history(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> list[StateEventView]:
+    """Every lifecycle transition of the model, newest first."""
+    get_model(session, scope, model_id)
+    events = session.scalars(
+        select(ModelStateEvent)
+        .where(ModelStateEvent.project_id == scope.project_id, ModelStateEvent.model_id == model_id)
+        .order_by(ModelStateEvent.created_at.desc(), ModelStateEvent.id.desc())
+    )
+    return [_event_view(session, e) for e in events]
+
+
+def _event_view(session: Session, event: ModelStateEvent) -> StateEventView:
+    kind = ActorKind(event.actor_kind)
+    person_id = event.on_behalf_of if kind is ActorKind.AGENT else event.actor_id
+    user = session.get(User, person_id) if person_id else None
+    return StateEventView(
+        state=ModelState(event.state),
+        seq=event.seq,
+        actor_kind=kind,
+        by_name=(user.display_name or user.email) if user else None,
+        note=event.note,
+        at=event.created_at,
+    )

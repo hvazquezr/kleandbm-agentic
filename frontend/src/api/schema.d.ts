@@ -541,6 +541,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get State History */
+        get: operations["get_state_history_tenants__tenant_id__projects__project_id__models__model_id__state_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/versions": {
         parameters: {
             query?: never;
@@ -1929,6 +1946,23 @@ export interface components {
             /** Tables */
             tables: components["schemas"]["RecordOut_TableData_"][];
         };
+        /** StateEventOut */
+        StateEventOut: {
+            /** Actor Kind */
+            actor_kind: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** By Name */
+            by_name: string | null;
+            /** Note */
+            note: string | null;
+            /** Seq */
+            seq: number | null;
+            state: components["schemas"]["ModelState"];
+        };
         /** StateIn */
         StateIn: {
             /** Note */
@@ -1940,6 +1974,7 @@ export interface components {
             /** Changed Since State */
             changed_since_state: boolean;
             effective_state: components["schemas"]["ModelState"];
+            last_event?: components["schemas"]["StateEventOut"] | null;
             /** Recorded At Seq */
             recorded_at_seq: number | null;
             recorded_state: components["schemas"]["ModelState"];
@@ -3418,6 +3453,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_state_history_tenants__tenant_id__projects__project_id__models__model_id__state_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateEventOut"][];
                 };
             };
             /** @description Validation Error */

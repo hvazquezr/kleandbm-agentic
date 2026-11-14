@@ -135,6 +135,19 @@ export function useVersions(path: ProjectPath, modelId: string) {
   });
 }
 
+/** Every lifecycle transition and who made it, newest first. Refreshed with the versions. */
+export function useStateHistory(path: ProjectPath, modelId: string) {
+  return useQuery({
+    queryKey: [...keys.versions(path, modelId), "state"],
+    queryFn: () =>
+      unwrap(
+        api.GET("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state/history", {
+          params: { path: { ...path, model_id: modelId } },
+        }),
+      ),
+  });
+}
+
 export function useCreateVersion(path: ProjectPath, modelId: string) {
   const invalidate = useInvalidateProjectData(path);
   return useMutation({

@@ -24,6 +24,8 @@ export type ModelCanvasHandle = {
   /** Positions for every table (saved, or auto-laid-out when none is saved). */
   autoLayout: () => Positions;
   fitView: () => void;
+  /** Pan and zoom to one table. */
+  focusTable: (id: string) => void;
   /** Flow coordinates for placing a new table in the middle of what's visible. */
   visibleCenter: () => { x: number; y: number };
 };
@@ -38,18 +40,27 @@ type Props = {
   selectedRelationshipId: string | null;
   highlightedIds?: Set<string>;
   onSelectTable: (id: string | null) => void;
+  /** Double-click: open the table's editor. */
+  onOpenTable?: (id: string) => void;
   onSelectRelationship: (id: string) => void;
   onMoveTable: (id: string, x: number, y: number) => void;
   onConnectTables: (fromTableId: string, toTableId: string) => void;
+  /** Right-click on empty canvas (with the flow position), a table or a relationship. */
+  onContextMenu?: (target: CanvasMenuTarget, screen: { x: number; y: number }) => void;
 };
+
+export type CanvasMenuTarget =
+  | { kind: "pane"; position: { x: number; y: number } }
+  | { kind: "table"; id: string }
+  | { kind: "relationship"; id: string };
 
 const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
   const {
     tables, attributes, relationships, savedLayout, readOnly,
     selectedTableId, selectedRelationshipId, highlightedIds,
-    onSelectTable, onSelectRelationship, onMoveTable, onConnectTables,
+    onSelectTable, onOpenTable, onSelectRelationship, onMoveTable, onConnectTables, onContextMenu,
   } = props;
-  const { fitView, screenToFlowPosition } = useReactFlow();
+  const { fitView, screenToFlowPosition, getNode, setCenter, getZoom } = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const attributesByTable = useMemo(() => {
@@ -97,9 +108,13 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
       type: "relationship" as const,
       source: rels[0].data.from_table_id,
       target: rels[0].data.to_table_id,
-      data: { relationships: rels, selectedId: selectedRelationshipId, onSelect: onSelectRelationship },
+      data: {
+        relationships: rels, selectedId: selectedRelationshipId, onSelect: onSelectRelationship,
+        onContextMenu: onContextMenu && ((id: string, e: React.MouseEvent) =>
+          onContextMenu({ kind: "relationship", id }, { x: e.clientX, y: e.clientY })),
+      },
     }));
-  }, [relationships, selectedRelationshipId, onSelectRelationship]);
+  }, [relationships, selectedRelationshipId, onSelectRelationship, onContextMenu]);
 
   const onNodesChange = useCallback((changes: NodeChange<TableFlowNode>[]) => {
     // Selection is owned by the editor page, so only apply position and size changes here.
@@ -116,6 +131,12 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
   useImperativeHandle(ref, () => ({
     autoLayout: () => fallbackLayout,
     fitView: () => fitView({ duration: 400, padding: 0.15 }),
+    focusTable: (id) => {
+      const n = getNode(id);
+      if (!n) return;
+      const w = n.measured?.width ?? 320, h = n.measured?.height ?? 200;
+      void setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom: Math.max(getZoom(), 0.9), duration: 400 });
+    },
     visibleCenter: () => {
       const r = containerRef.current?.getBoundingClientRect();
       if (!r) return { x: 0, y: 0 };
@@ -141,7 +162,7 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
       }
       return start;
     },
-  }), [fallbackLayout, fitView, screenToFlowPosition, nodes]);
+  }), [fallbackLayout, fitView, screenToFlowPosition, getNode, setCenter, getZoom, nodes]);
 
   return (
     <div ref={containerRef} className="size-full">
@@ -152,6 +173,17 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onNodeClick={(_, n) => onSelectTable(n.id)}
+      onNodeDoubleClick={(_, n) => onOpenTable?.(n.id)}
+      zoomOnDoubleClick={false}
+      onPaneContextMenu={onContextMenu && ((e) => {
+        e.preventDefault();
+        const screen = { x: e.clientX, y: e.clientY };
+        onContextMenu({ kind: "pane", position: screenToFlowPosition(screen) }, screen);
+      })}
+      onNodeContextMenu={onContextMenu && ((e, n) => {
+        e.preventDefault();
+        onContextMenu({ kind: "table", id: n.id }, { x: e.clientX, y: e.clientY });
+      })}
       onPaneClick={() => onSelectTable(null)}
       onNodeDragStop={(_, n) => onMoveTable(n.id, n.position.x, n.position.y)}
       onConnect={onConnect}
@@ -163,8 +195,8 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
       colorMode="dark"
     >
       <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-      <Controls showInteractive={false} />
-      <MiniMap pannable zoomable />
+      <Controls showInteractive={false} position="bottom-left" />
+      <MiniMap pannable zoomable position="bottom-right" />
     </ReactFlow>
     </div>
   );

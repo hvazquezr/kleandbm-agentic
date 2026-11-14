@@ -13,6 +13,8 @@ export type RelationshipEdgeData = {
   relationships: RelationshipRecord[];
   selectedId: string | null;
   onSelect: (relationshipId: string) => void;
+  /** Right-click on the line or a role label. */
+  onContextMenu?: (relationshipId: string, e: React.MouseEvent) => void;
 };
 
 export type RelationshipFlowEdge = Edge<RelationshipEdgeData, "relationship">;
@@ -76,7 +78,13 @@ export default function RelationshipEdge({ source, target, data }: EdgeProps<Rel
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode || !data) return null;
 
-  const { relationships, selectedId, onSelect } = data;
+  const { relationships, selectedId, onSelect, onContextMenu } = data;
+  const menu = (id: string) => (e: React.MouseEvent) => {
+    if (!onContextMenu) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(id, e);
+  };
   const isSelected = relationships.some((r) => r.id === selectedId);
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(sourceNode, targetNode);
   const [path, labelX, labelY] = getBezierPath({
@@ -98,7 +106,7 @@ export default function RelationshipEdge({ source, target, data }: EdgeProps<Rel
         style={{ animation: hovered ? "edge-dash-flow 0.4s linear infinite" : undefined }} />
       <path d={path} fill="none" stroke="transparent" strokeWidth={20} style={{ cursor: "pointer" }}
         onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-        onClick={() => onSelect(relationships[0].id)} />
+        onClick={() => onSelect(relationships[0].id)} onContextMenu={menu(relationships[0].id)} />
       <EdgeLabelRenderer>
         <div style={marker(sx + so.dx, sy + so.dy, ROTATION[sourcePos])}>
           {fromEnd === "many" ? <CrowsFootMany color={color} /> : <CrowsFootOne color={color} />}
@@ -116,13 +124,14 @@ export default function RelationshipEdge({ source, target, data }: EdgeProps<Rel
             <span className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-md text-xs font-medium bg-card/90 shadow-sm"
               style={{ border: `1.5px solid ${color}` }}>
               {relationships.map((r) => (
-                <button key={r.id} type="button" className="hover:underline" onClick={() => onSelect(r.id)}>
+                <button key={r.id} type="button" className="hover:underline" onClick={() => onSelect(r.id)} onContextMenu={menu(r.id)}>
                   {r.data.role_name ?? "(no role)"}
                 </button>
               ))}
             </span>
           ) : (
             <button type="button" aria-label="Select relationship" onClick={() => onSelect(relationships[0].id)}
+              onContextMenu={menu(relationships[0].id)}
               className="block size-5 rounded-full bg-card/90 shadow-sm" style={{ border: `1.5px solid ${color}` }} />
           )}
         </div>

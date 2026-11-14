@@ -149,7 +149,7 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
         <p className={cn("text-sm", candidate.stale || candidate.status === "stale" ? "text-amber-400" : "text-muted-foreground")}>
           {candidate.stale ? CANDIDATE_STATUS.stale : CANDIDATE_STATUS[candidate.status] ?? candidate.status}
         </p>
-        <Readiness candidate={candidate} reviewed={!!last} />
+        <Readiness candidate={candidate} reviewed={!!last} state={snapshot.state} />
       </section>
 
       {open && candidate.diff && (
@@ -199,7 +199,36 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
   );
 }
 
-function Readiness({ candidate, reviewed }: { candidate: Candidate; reviewed: boolean }) {
+function Readiness({ candidate, reviewed, state }: { candidate: Candidate; reviewed: boolean; state: Snapshot["state"] }) {
+  // Once a design is applied, the model's lifecycle moves on without it: a person accepts it,
+  // or a later change (to the model or the shared registers) returns it to Draft. Say what's
+  // true now, not what was true when the design was applied.
+  if (candidate.status === "applied") {
+    if (state.effective_state === "accepted") {
+      return (
+        <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2.5 text-sm flex gap-2">
+          <CheckCircle2 className="size-4 text-blue-300 shrink-0 mt-0.5" />
+          <span>
+            Accepted by {state.last_event?.by_name ?? "a project member"} at seq {state.recorded_at_seq}
+            {state.last_event && <> on {new Date(state.last_event.at).toLocaleDateString()}</>}
+            {state.last_event?.note ? <>: “{state.last_event.note}”</> : "."}
+          </span>
+        </div>
+      );
+    }
+    if (state.effective_state === "draft" && candidate.ready_for_review) {
+      return (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-sm flex gap-2">
+          <AlertTriangle className="size-4 text-amber-400 shrink-0 mt-0.5" />
+          <span>
+            Nothing blocked review when this design was applied (seq {candidate.applied_seq}), but the model or its
+            registers changed since{state.changed_since_state && state.recorded_at_seq ? ` seq ${state.recorded_at_seq}` : ""}, so it's a Draft again.
+            Mark it Ready for Review or accept it under Versions.
+          </span>
+        </div>
+      );
+    }
+  }
   if (candidate.ready_for_review) {
     return (
       <div className="rounded-md border border-green-500/30 bg-green-500/10 p-2.5 text-sm flex gap-2">

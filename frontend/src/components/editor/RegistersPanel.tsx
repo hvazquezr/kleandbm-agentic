@@ -84,17 +84,23 @@ function Decide({ id, seq, code, write }: { id: string; seq: number; code: strin
   );
 }
 
+export type RegisterKey = "requirements" | "definitions" | "questions" | "decisions" | "checks";
+
 export function RegistersPanel({
   snapshot,
   onSelectRecord,
   canApprove = false,
   write,
+  only,
 }: {
   snapshot: Snapshot;
   onSelectRecord: (id: string) => void;
   canApprove?: boolean;
   write?: Write;
+  /** Show one register instead of all of them. */
+  only?: RegisterKey;
 }) {
+  const show = (k: RegisterKey) => !only || only === k;
   const trace = useMemo(() => buildTrace(snapshot), [snapshot]);
   const decide = (r: { id: string; seq: number; code: string | null; data: { confirmation_status?: string } }) =>
     canApprove && write && (r.data.confirmation_status ?? "unconfirmed") === "unconfirmed"
@@ -102,6 +108,7 @@ export function RegistersPanel({
       : undefined;
   return (
     <div className="space-y-6">
+      {show("requirements") && (
       <Section title="Requirements" count={snapshot.requirements.length}>
         {snapshot.requirements.map((r) => (
           <Item key={r.id} code={r.code} onClick={() => onSelectRecord(r.id)} actions={decide(r)}>
@@ -121,7 +128,9 @@ export function RegistersPanel({
           </Item>
         ))}
       </Section>
+      )}
 
+      {show("definitions") && (
       <Section title="Business definitions" count={snapshot.definitions.length}>
         {snapshot.definitions.map((d) => (
           <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)} actions={decide(d)}>
@@ -136,7 +145,9 @@ export function RegistersPanel({
           </Item>
         ))}
       </Section>
+      )}
 
+      {show("questions") && (
       <Section title="Questions & conflicts" count={snapshot.questions.length}>
         {snapshot.questions.map((q) => (
           <Item key={q.id} code={q.code} onClick={() => onSelectRecord(q.id)}>
@@ -149,7 +160,9 @@ export function RegistersPanel({
           </Item>
         ))}
       </Section>
+      )}
 
+      {show("decisions") && (
       <Section title="Decisions & assumptions" count={snapshot.decisions.length}>
         {snapshot.decisions.map((d) => (
           <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)}>
@@ -162,7 +175,9 @@ export function RegistersPanel({
           </Item>
         ))}
       </Section>
+      )}
 
+      {show("checks") && (
       <Section title="Validation checks" count={snapshot.checks.length}>
         {snapshot.checks.map((c) => (
           <Item key={c.id} code={c.code} onClick={() => onSelectRecord(c.id)}>
@@ -180,6 +195,7 @@ export function RegistersPanel({
           </Item>
         ))}
       </Section>
+      )}
     </div>
   );
 }

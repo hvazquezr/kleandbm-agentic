@@ -3357,6 +3357,65 @@
         "title": "SnapshotOut",
         "type": "object"
       },
+      "StateEventOut": {
+        "properties": {
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModelState"
+          }
+        },
+        "required": [
+          "state",
+          "seq",
+          "actor_kind",
+          "by_name",
+          "note",
+          "at"
+        ],
+        "title": "StateEventOut",
+        "type": "object"
+      },
       "StateIn": {
         "properties": {
           "note": {
@@ -3389,6 +3448,16 @@
           },
           "effective_state": {
             "$ref": "#/components/schemas/ModelState"
+          },
+          "last_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateEventOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recorded_at_seq": {
             "anyOf": [
@@ -6434,6 +6503,78 @@
           }
         ],
         "summary": "Set State",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state/history": {
+      "get": {
+        "operationId": "get_state_history_tenants__tenant_id__projects__project_id__models__model_id__state_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StateEventOut"
+                  },
+                  "title": "Response Get State History Tenants  Tenant Id  Projects  Project Id  Models  Model Id  State History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get State History",
         "tags": [
           "modeling"
         ]

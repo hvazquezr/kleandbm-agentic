@@ -19,6 +19,16 @@ class InvalidToken(Exception):
     pass
 
 
+# Auth0 only lets custom claims into access tokens under a namespace. An Auth0 Action adds the
+# user's profile as `https://kleandbm.ai/name` and `.../email`; plain `name`/`email` are read too.
+CLAIM_NAMESPACE = "https://kleandbm.ai/"
+
+
+def _profile_claim(claims: dict, key: str) -> str | None:
+    value = claims.get(CLAIM_NAMESPACE + key) or claims.get(key)
+    return value.strip() or None if isinstance(value, str) else None
+
+
 @dataclass(frozen=True)
 class TokenClaims:
     issuer: str
@@ -74,8 +84,8 @@ class TokenVerifier:
             issuer=claims["iss"],
             subject=claims["sub"],
             permissions=permissions,
-            name=claims.get("name"),
-            email=claims.get("email"),
+            name=_profile_claim(claims, "name"),
+            email=_profile_claim(claims, "email"),
         )
 
 

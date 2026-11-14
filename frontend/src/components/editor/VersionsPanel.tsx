@@ -2,7 +2,7 @@ import { CheckCircle2, Eye, History, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { ModelState, Snapshot } from "@/api/client";
-import { useCreateVersion, useSetState, useVersions, type ProjectPath } from "@/api/hooks";
+import { useCreateVersion, useSetState, useStateHistory, useVersions, type ProjectPath } from "@/api/hooks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { STATE_LABELS } from "@/lib/labels";
@@ -28,6 +28,7 @@ export function VersionsPanel({
   const versions = useVersions(path, modelId);
   const createVersion = useCreateVersion(path, modelId);
   const setState = useSetState(path, modelId);
+  const lifecycle = useStateHistory(path, modelId);
   const [name, setName] = useState("");
   const [ask, confirmDialog] = useConfirm();
   const state = snapshot.state;
@@ -84,6 +85,29 @@ export function VersionsPanel({
           )}
         </div>
       </section>
+
+      {!!lifecycle.data?.length && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Lifecycle history</h3>
+          <ol className="space-y-1.5">
+            {lifecycle.data.map((e, i) => (
+              <li key={i} className="text-sm rounded-md border px-2.5 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{STATE_LABELS[e.state]}</span>
+                  {e.seq !== null && <span className="font-mono text-xs text-muted-foreground">seq {e.seq}</span>}
+                  <span className="ml-auto text-xs text-muted-foreground">{new Date(e.at).toLocaleString()}</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {e.actor_kind === "agent"
+                    ? `Agent, on behalf of ${e.by_name ?? "a project member"}`
+                    : `By ${e.by_name ?? "a project member (no name on file)"}`}
+                </div>
+                {e.note && <div className="text-xs mt-0.5">“{e.note}”</div>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">Named versions</h3>
