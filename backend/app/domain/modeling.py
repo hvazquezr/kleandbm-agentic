@@ -137,7 +137,8 @@ class StateEventView:
 class ModelStateView:
     recorded_state: ModelState
     recorded_at_seq: int | None
-    # Draft whenever structural changes landed after a Ready for Review or Accepted event.
+    # Draft whenever the model, or a register entry linked to it, changed after a Ready for
+    # Review or Accepted event.
     effective_state: ModelState
     changed_since_state: bool
     # The latest transition, with who made it; None while the model has never left Draft.
@@ -1007,20 +1008,68 @@ def get_state(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> Mod
     )
     if event is None:
         return ModelStateView(ModelState.DRAFT, None, ModelState.DRAFT, False)
-    # Changes to this model's elements, or to the project registers, after the event.
-    changed = bool(
-        session.scalar(
-            select(func.count())
-            .select_from(Changeset)
-            .where(
-                Changeset.project_id == scope.project_id,
-                Changeset.seq > (event.seq or 0),
-                (Changeset.model_id == model_id) | (Changeset.model_id.is_(None)),
-            )
-        )
-    )
+    changed = _changed_since(session, scope, model_id, event.seq or 0)
     effective = ModelState.DRAFT if changed else event.state
     return ModelStateView(event.state, event.seq, effective, changed, _event_view(session, event))
+
+
+_REGISTER_TYPES = (RecordType.REQUIREMENT, RecordType.DEFINITION, RecordType.QUESTION, RecordType.DECISION)
+# From a register entry linked to the model, these links reach further entries that shape it:
+# definitions it uses or conflicts with, and questions, decisions and alternatives about it.
+_OUTWARD = (LinkType.USES_DEFINITION, LinkType.CONFLICTS_WITH)
+_INWARD = (LinkType.CONCERNS, LinkType.AFFECTS, LinkType.ALTERNATIVE_FOR, LinkType.CONFLICTS_WITH)
+
+
+def _changed_since(session: Session, scope: ProjectScope, model_id: uuid.UUID, seq: int) -> bool:
+    """Whether the model changed after a lifecycle event at ``seq``: a changeset on the model
+    itself, or a change to a register entry linked to it (or to those links). Register changes
+    that concern only other models in the project don't count."""
+    own = session.scalar(
+        select(func.count()).select_from(Changeset).where(
+            Changeset.project_id == scope.project_id, Changeset.seq > seq, Changeset.model_id == model_id))
+    if own:
+        return True
+    model_records = set(session.scalars(
+        select(Record.id).where(Record.project_id == scope.project_id, Record.model_id == model_id)))
+    if not model_records:
+        return False
+    # Links in effect at the event or added since; a link removed since is a change in itself.
+    links = list(session.scalars(select(RecordLink).where(
+        RecordLink.project_id == scope.project_id,
+        (RecordLink.removed_seq.is_(None)) | (RecordLink.removed_seq > seq))))
+    registers = set(session.scalars(select(Record.id).where(
+        Record.project_id == scope.project_id, Record.model_id.is_(None),
+        Record.record_type.in_(_REGISTER_TYPES))))
+    # Entries linked directly to the model's elements and checks, in either direction.
+    linked = {l.to_id if l.from_id in model_records else l.from_id for l in links
+              if (l.from_id in model_records) != (l.to_id in model_records)} & registers
+    # Then what shapes those entries, transitively through register entries only.
+    frontier = set(linked)
+    while frontier:
+        found = set()
+        for l in links:
+            if l.from_id in frontier and l.link_type in _OUTWARD:
+                found.add(l.to_id)
+            if l.to_id in frontier and l.link_type in _INWARD:
+                found.add(l.from_id)
+        frontier = (found & registers) - linked
+        linked |= frontier
+    def relevant(l: RecordLink) -> bool:
+        if l.from_id in model_records or l.to_id in model_records:
+            return True
+        # Between register entries, one of them already linked (not another model's element).
+        return l.from_id in registers and l.to_id in registers and (l.from_id in linked or l.to_id in linked)
+
+    if any((l.created_seq > seq or (l.removed_seq or 0) > seq) and relevant(l) for l in links):
+        return True
+    if not linked:
+        return False
+    for rtype in _REGISTER_TYPES:
+        rev = REVISION_TABLES[rtype]
+        if session.scalar(select(func.count()).select_from(rev).where(
+                rev.project_id == scope.project_id, rev.seq > seq, rev.record_id.in_(linked))):
+            return True
+    return False
 
 
 def state_history(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> list[StateEventView]:

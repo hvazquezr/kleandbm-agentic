@@ -271,11 +271,78 @@ def test_acceptance_needs_approval_and_lapses_on_change(proj, as_user, client, m
     # A later token without the profile claims doesn't blank the stored name.
     assert proj.alice.get(surl).json()["last_event"]["by_name"] == "Alice Analyst"
 
-    # A register change counts too: definitions can invalidate an accepted model.
-    proj.cs(carol, [{"op": "create", "type": "definition", "data": {"term": "Customer", "provenance": "inferred"}}], model_id=None)
+    # A register entry linked to the model counts too: here a definition its fact table uses.
+    fact = next(t for t in proj.snap()["tables"] if t["data"]["name"] == "fact_sales")
+    proj.cs(carol, [{"op": "create", "type": "definition", "ref": "d", "data": {"term": "Customer", "provenance": "inferred"}},
+                    {"op": "link", "from_id": fact["id"], "to_id": "$d", "link_type": "uses_definition"}], model_id=None)
     lapsed = proj.alice.get(surl).json()
     assert lapsed["recorded_state"] == "accepted" and lapsed["recorded_at_seq"] == 1
     assert lapsed["effective_state"] == "draft" and lapsed["changed_since_state"] is True
+
+
+def test_only_register_entries_linked_to_the_model_reset_it(proj):
+    """Registers are shared by the project's models; a change that concerns only another model
+    (or no model yet) leaves an accepted model accepted."""
+    created = proj.cs(proj.alice, star_schema_ops()).json()["created"]
+    regs = proj.cs(proj.alice, [
+        {"op": "create", "type": "requirement", "ref": "r", "data": {"statement": "Sales by customer", "origin_kind": "user_statement"}},
+        {"op": "create", "type": "definition", "ref": "d", "data": {"term": "Sales", "provenance": "inferred"}},
+        {"op": "link", "from_id": "$r", "to_id": created["fact"], "link_type": "maps_to"},
+        {"op": "link", "from_id": "$r", "to_id": "$d", "link_type": "uses_definition"},
+    ], model_id=None).json()["created"]
+    other = proj.alice.post(f"{proj.base}/models", json={"name": "Inventory"}).json()["id"]
+    other_table = proj.cs(proj.alice, [{"op": "create", "type": "table", "ref": "t", "data": {
+        "name": "fact_stock", "kind": "fact"}}], model_id=other).json()["created"]["t"]
+    surl = f"{proj.base}/models/{proj.model}/state"
+
+    def write(ops, model_id=None):
+        r = proj.cs(proj.alice, ops, model_id=model_id)
+        assert r.status_code == 201, r.text
+        return r
+
+    def accept():
+        assert proj.alice.post(surl, json={"state": "accepted"}).status_code == 200
+        return proj.alice.get(surl).json()
+
+    def state():
+        return proj.alice.get(surl).json()["effective_state"]
+
+    def seq_of(rid):
+        return proj.alice.get(f"{proj.base}/records/{rid}").json()["seq"]
+
+    accept()
+    # Not linked to this model: a new requirement, the other model's own entries and links,
+    # and the other model's element using this model's definition.
+    write([
+        {"op": "create", "type": "requirement", "ref": "x", "data": {"statement": "Stock by day", "origin_kind": "user_statement"}},
+        {"op": "link", "from_id": "$x", "to_id": other_table, "link_type": "maps_to"},
+        {"op": "create", "type": "question", "ref": "q", "data": {"kind": "clarification", "description": "Which stock?", "is_blocking": False}},
+        {"op": "link", "from_id": "$q", "to_id": "$x", "link_type": "concerns"},
+        {"op": "link", "from_id": other_table, "to_id": regs["d"], "link_type": "uses_definition"},
+    ], model_id=None)
+    write([{"op": "update", "id": other_table, "expected_seq": seq_of(other_table),
+                          "data": {"grain": "One row per product per day"}}], model_id=other)
+    assert state() == "accepted"
+
+    # Linked: the mapped requirement, the definition it uses, a question about either.
+    write([{"op": "update", "id": regs["r"], "expected_seq": seq_of(regs["r"]),
+                          "data": {"statement": "Sales by customer and month"}}], model_id=None)
+    assert state() == "draft"
+    accept()
+    write([{"op": "update", "id": regs["d"], "expected_seq": seq_of(regs["d"]),
+                          "data": {"definition": "Gross sales before discounts"}}], model_id=None)
+    assert state() == "draft"
+    accept()
+    write([
+        {"op": "create", "type": "question", "ref": "q", "data": {"kind": "clarification", "description": "Net or gross?", "is_blocking": False}},
+        {"op": "link", "from_id": "$q", "to_id": regs["d"], "link_type": "concerns"},
+    ], model_id=None)
+    assert state() == "draft"
+    accept()
+    # Unmapping the requirement changes what the model answers, so it counts too.
+    mapping = next(l for l in proj.snap()["links"] if l["from_id"] == regs["r"] and l["link_type"] == "maps_to")
+    assert proj.cs(proj.alice, [{"op": "unlink", "link_id": mapping["id"]}], model_id=None).status_code == 201
+    assert state() == "draft"
 
 
 # --- Scope and permissions ------------------------------------------------------------------
