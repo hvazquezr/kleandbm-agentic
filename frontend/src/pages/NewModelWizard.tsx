@@ -226,31 +226,53 @@ function RequirementsStep({ path, modelId, draft, onBack, onNext }: {
 
 function FinishStep({ path, modelId, onBack }: { path: ProjectPath; modelId: string; onBack: () => void }) {
   const snapshot = useSnapshot(path, modelId);
+  const linked = useModelSources(path, modelId);
   const [, navigate] = useLocation();
   const s = snapshot.data;
-  const open = s?.questions.filter((q) => q.data.status === "open").length ?? 0;
+  const open = s?.questions.filter((q) => q.data.status === "open") ?? [];
+  const blocking = open.filter((q) => q.data.is_blocking).length;
+  const sources = linked.data?.length;
+  const editor = `/t/${path.tenant_id}/p/${path.project_id}/m/${modelId}`;
+  const canDraft = !!s && s.requirements.length > 0;
   return (
     <Card><CardContent className="space-y-4 pt-6">
       {s ? (
-        <div className="grid grid-cols-3 gap-3 text-center">
-          {[["Requirements", s.requirements.length], ["Definitions", s.definitions.length], ["Open questions", open]].map(([label, n]) => (
-            <div key={label as string} className="rounded-md border p-3">
+        <div className="grid grid-cols-4 gap-3 text-center">
+          {([["Requirements", s.requirements.length], ["Definitions", s.definitions.length],
+             ["Open questions", open.length], ["Linked sources", sources ?? "…"]] as const).map(([label, n]) => (
+            <div key={label} className="rounded-md border p-3">
               <div className="text-2xl font-semibold">{n}</div>
               <div className="text-xs text-muted-foreground">{label}</div>
             </div>
           ))}
         </div>
       ) : <Loader2 className="size-4 animate-spin" />}
-      <p className="text-sm text-muted-foreground">
-        Everything the agent recorded is unconfirmed until someone with approval rights confirms it in the Registers tab.
-        You can keep talking to the agent from the model editor.
-      </p>
+      <div className="text-sm text-muted-foreground space-y-2">
+        <p>
+          Next, the Architect designs a draft Kimball model from these requirements
+          {sources ? " and checks it against the linked source" : ""}, and the Validator reviews it. It takes a few
+          minutes; you'll follow it in the editor's AI Assistant, and the tables appear on the canvas when it's done.
+        </p>
+        {s && s.requirements.length === 0 && (
+          <p className="text-amber-500">There are no requirements yet, so there's nothing to design from. Go back and talk to the Requirements agent.</p>
+        )}
+        {open.length > 0 && (
+          <p>
+            {open.length} question{open.length === 1 ? " is" : "s are"} still open{blocking ? ` (${blocking} blocking)` : ""}. The
+            Architect designs around them and lists them as blockers; you can also go back and answer them first.
+          </p>
+        )}
+        {sources === 0 && (
+          <p>No source is linked, so the design will be unverified against data. You can link one in the Source step.</p>
+        )}
+        <p>Nothing is confirmed or accepted until a person does it, in the editor's Registers and Review.</p>
+      </div>
       <Footer onBack={onBack}>
-        <Button variant="outline" disabled title="Available once the Architect agent is built (P4)">
-          <Sparkles className="size-4" /> Generate draft model
+        <Button variant="outline" onClick={() => navigate(editor)}>
+          Open model without a draft
         </Button>
-        <Button onClick={() => navigate(`/t/${path.tenant_id}/p/${path.project_id}/m/${modelId}`)}>
-          Open model <ArrowRight className="size-4" />
+        <Button disabled={!canDraft} onClick={() => navigate(`${editor}?draft=1`)}>
+          <Sparkles className="size-4" /> Generate draft model <ArrowRight className="size-4" />
         </Button>
       </Footer>
     </CardContent></Card>

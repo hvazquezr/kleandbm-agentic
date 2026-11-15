@@ -1,5 +1,5 @@
 import { Bot, ClipboardList, Database, Eye, History, LayoutGrid, Maximize, MoreVertical, PanelRightClose, PanelRightOpen, Pencil, Plus, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
@@ -9,7 +9,7 @@ import type { AgentName } from "@/api/hooks";
 import { buildTrace } from "@/lib/trace";
 import { SourcesManager } from "@/components/sources/SourcesManager";
 import type { Schemas, Snapshot } from "@/api/client";
-import { useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
+import { useModelSources, useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
 import ModelCanvas, { type CanvasMenuTarget, type ModelCanvasHandle } from "@/components/canvas/ModelCanvas";
 import { Drawer, LogoPill, Pill, TablesPanel, ToolButton, usePersistentFlag } from "@/components/editor/CanvasChrome";
 import { EnumSelect, Field } from "@/components/editor/fields";
@@ -67,6 +67,9 @@ export default function ModelEditor() {
   const [localLayout, setLocalLayout] = useState<Positions>({});
   const [agent, setAgent] = useState<AgentName>("business_requirements");
   const [focusCandidate, setFocusCandidate] = useState<string | undefined>(undefined);
+  // Bumped to start an Architect draft run in the (always mounted) Architect panel.
+  const [draftRequest, setDraftRequest] = useState(0);
+  const linkedSources = useModelSources(path, modelId);
 
   const role = project.data?.role;
   const canEdit = role !== undefined && role !== "viewer";
@@ -154,6 +157,25 @@ export default function ModelEditor() {
     setMenu({ target, ...at });
   }, []);
   const toggleDrawer = (d: DrawerName) => setDrawer((cur) => (cur === d ? null : d));
+  const askArchitect = () => { setAgent("architect"); setDrawer("assistant"); };
+  const generateDraft = useCallback(() => {
+    setAgent("architect");
+    setDrawer("assistant");
+    setDraftRequest((n) => n + 1);
+  }, []);
+  // The wizard's "Generate draft model" lands here with ?draft=1: start the run once, only on
+  // an empty model the user can edit, then drop the flag so a reload doesn't start another.
+  const draftHandled = useRef(false);
+  useEffect(() => {
+    if (draftHandled.current || !snapshot.data || role === undefined) return;
+    draftHandled.current = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("draft") !== "1") return;
+    params.delete("draft");
+    const rest = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
+    if (canEdit && snapshot.data.tables.length === 0) generateDraft();
+  }, [snapshot.data, role, canEdit, generateDraft]);
   const onCandidate = useCallback((id: string) => {
     setFocusCandidate(id);
     toast.info("The Architect's design and the Validator's review are ready.", {
@@ -196,17 +218,10 @@ export default function ModelEditor() {
 
       <main className="relative flex-1 min-w-0 group/canvas">
         {snap.tables.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
-            <p>This model has no tables yet.</p>
-            {!readOnly && (
-              <div className="flex gap-2">
-                <Button onClick={() => { setAgent("architect"); setDrawer("assistant"); }}>
-                  <Sparkles className="size-4" /> Ask the Architect
-                </Button>
-                <Button variant="outline" onClick={() => setAddingTable({ at: null })}><Plus className="size-4" /> Add a table</Button>
-              </div>
-            )}
-          </div>
+          <EmptyCanvas readOnly={readOnly} requirements={snap.requirements.length}
+            openQuestions={snap.questions.filter((q) => q.data.status === "open").length}
+            sources={linkedSources.data?.length}
+            onGenerate={generateDraft} onAddTable={() => setAddingTable({ at: null })} />
         ) : (
           <ModelCanvas
             ref={canvas}
@@ -321,6 +336,7 @@ export default function ModelEditor() {
               modelId={modelId}
               canEdit={canEdit && viewingSeq === undefined}
               className={agent === a ? "flex-1" : "hidden"}
+              startDraft={a === "architect" ? draftRequest : 0}
               onSelectRecord={selectRecord}
               onCandidate={onCandidate}
             />
@@ -357,7 +373,7 @@ export default function ModelEditor() {
                 <>
                   {!readOnly && <DropdownMenuItem onSelect={() => setAddingTable({ at })}><Plus className="size-4" /> Add table here</DropdownMenuItem>}
                   {!readOnly && (
-                    <DropdownMenuItem onSelect={() => { setAgent("architect"); setDrawer("assistant"); }}>
+                    <DropdownMenuItem onSelect={askArchitect}>
                       <Sparkles className="size-4" /> Ask the Architect
                     </DropdownMenuItem>
                   )}
@@ -636,5 +652,53 @@ function AddTableDialog({ onClose, onCreate }: { onClose: () => void; onCreate: 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** An empty model is never a dead end: draft it with the Architect, or start by hand. */
+function EmptyCanvas({ readOnly, requirements, openQuestions, sources, onGenerate, onAddTable }: {
+  readOnly: boolean;
+  requirements: number;
+  openQuestions: number;
+  sources: number | undefined;
+  onGenerate: () => void;
+  onAddTable: () => void;
+}) {
+  return (
+    <div className="h-full flex items-center justify-center p-4">
+      <div className="max-w-md w-full rounded-xl border bg-card/60 p-6 space-y-4 text-center">
+        <div className="space-y-1">
+          <p className="font-medium">This model has no tables yet</p>
+          <p className="text-sm text-muted-foreground">
+            {requirements} requirement{requirements === 1 ? "" : "s"}
+            {openQuestions > 0 && ` · ${openQuestions} open question${openQuestions === 1 ? "" : "s"}`}
+            {sources !== undefined && (sources > 0
+              ? ` · ${sources} linked source${sources === 1 ? "" : "s"}`
+              : " · no linked source")}
+          </p>
+        </div>
+        {!readOnly ? (
+          <>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button onClick={onGenerate} disabled={requirements === 0}
+                title={requirements === 0 ? "Record requirements first, with the Requirements agent" : undefined}>
+                <Sparkles className="size-4" /> Generate draft model
+              </Button>
+              <Button variant="outline" onClick={onAddTable}><Plus className="size-4" /> Add a table</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {requirements === 0
+                ? "The Architect designs from the requirements. Record them with the AI Assistant's Requirements agent first."
+                : sources === 0
+                  ? "With no linked source, the Architect designs from the registers only and marks the design unverified against data."
+                  : "The Architect designs from the requirements and checks the linked data. It takes a few minutes; you can follow it in the AI Assistant."}
+              {" "}You can also right-click the canvas.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">You have view access, so you can't add tables.</p>
+        )}
+      </div>
+    </div>
   );
 }

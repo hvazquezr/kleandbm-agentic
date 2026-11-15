@@ -100,6 +100,7 @@ export function AssistantPanel({
   onSelectRecord,
   onCandidate,
   draft,
+  startDraft = 0,
   agent = "business_requirements",
   className,
 }: {
@@ -111,6 +112,8 @@ export function AssistantPanel({
   onCandidate?: (candidateId: string) => void;
   /** Prefills the composer (e.g. from the wizard's context step). */
   draft?: string;
+  /** Architect only: each new value starts a "design a draft model" run, unless one is running. */
+  startDraft?: number;
   agent?: AgentName;
   className?: string;
 }) {
@@ -138,6 +141,14 @@ export function AssistantPanel({
   useEffect(() => {
     if (draft) setText(draft);
   }, [draft]);
+  // Start a requested draft once the conversation list is in, so the run reuses the existing
+  // Architect conversation instead of creating another.
+  const startedDraft = useRef(0);
+  useEffect(() => {
+    if (agent !== "architect" || !canEdit || startDraft <= startedDraft.current || !conversations.isSuccess) return;
+    startedDraft.current = startDraft;
+    void send(DRAFT_PROMPT);
+  });
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [messages.data?.length, liveText, liveTools.length, pending]);
