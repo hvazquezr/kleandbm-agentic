@@ -108,6 +108,8 @@ class Loop:
                 finished = finished or name in self.finish_tools
                 if "code" in out and "id" in out and "type" in out:
                     item["record"] = {"id": out["id"], "code": out["code"], "type": out["type"]}
+                    if out.get("action"):  # what happened to it: added, answered, deferred, updated…
+                        item["record"]["action"] = out["action"]
             except Exception as exc:
                 if savepoint is not None:
                     savepoint.rollback()

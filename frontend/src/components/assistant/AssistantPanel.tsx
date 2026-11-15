@@ -23,7 +23,7 @@ type ToolActivity = {
   name: string;
   status: "started" | "ok" | "error";
   summary?: string;
-  record?: { id: string; code: string } | null;
+  record?: { id: string; code: string; action?: string } | null;
   /** The subgraph that made the call, when the Architect consulted or was reviewed. */
   agent?: "business_requirements" | "validator" | "review";
 };
@@ -369,9 +369,14 @@ function ActivityList({ tools, onSelectRecord }: { tools: ToolActivity[]; onSele
         {records.length > 0 && ` · ${records.length} register change${records.length === 1 ? "" : "s"}`}
       </button>
       {!open && records.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {records.map((t, i) => (
-            <RecordChip key={i} code={t.record!.code} onClick={() => onSelectRecord?.(t.record!.id)} />
+        <div className="mt-1 space-y-1">
+          {groupByAction(records).map((g) => (
+            <div key={g.label} className="flex flex-wrap items-center gap-1">
+              <span className="mr-0.5">{g.label}</span>
+              {g.items.map((r) => (
+                <RecordChip key={r.id} code={r.code} onClick={() => onSelectRecord?.(r.id)} />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -388,6 +393,26 @@ function ActivityList({ tools, onSelectRecord }: { tools: ToolActivity[]; onSele
       )}
     </div>
   );
+}
+
+const ACTION_LABELS: [string, string][] = [
+  ["answered", "Answered"], ["deferred", "Deferred"], ["resolved", "Resolved"],
+  ["added", "Added"], ["updated", "Updated"],
+];
+
+/** "Answered Q-001 Q-008 · Added DEF-020": each record once per action, answers first. */
+function groupByAction(tools: ToolActivity[]) {
+  const groups = new Map<string, Map<string, { id: string; code: string }>>();
+  for (const t of tools) {
+    const action = t.record!.action ?? "changed";
+    const g = groups.get(action) ?? new Map();
+    g.set(t.record!.id, { id: t.record!.id, code: t.record!.code });
+    groups.set(action, g);
+  }
+  const order = [...ACTION_LABELS, ["changed", "Changed"] as [string, string]];
+  return order
+    .filter(([key]) => groups.has(key))
+    .map(([key, label]) => ({ label, items: [...groups.get(key)!.values()] }));
 }
 
 function LiveActivity({ tools, onSelectRecord }: { tools: ToolActivity[]; onSelectRecord?: (id: string) => void }) {

@@ -194,8 +194,10 @@ function SourceStep({ path, modelId, role, onBack, onNext }: {
   return (
     <Card><CardContent className="space-y-4 pt-6">
       <p className="text-sm text-muted-foreground">
-        Optional. A read-only connection to a MySQL source lets the agents check what the data can support. You can skip this
-        and add it later from the model's Sources tab; the model can start from documents and conversation alone.
+        Optional. A read-only connection to a MySQL source lets the Architect check what the data can support when it designs
+        the model: tables, keys, grain and data checks. The Business Requirements agent in the next step works from documents
+        and conversation, so its feasibility notes stay provisional until then. You can skip this and add a source later from
+        the model's Sources menu.
       </p>
       <SourcesManager path={path} role={role} modelId={modelId} />
       <Footer onBack={onBack}>

@@ -52,6 +52,14 @@ feasibility_notes and raise a question. You can propose an alternative capabilit
 separate requirement with is_proposed_alternative=true, linked with alternative_for. It is \
 not agreed until the user confirms it.
 
+Data sources
+- You can't query databases. Project context lists the data sources linked to the model by \
+name; when one is linked, the Architect inspects it (tables, keys, grain, data checks) when it \
+designs the model. Never say no source is connected when one is listed. Feasibility you judge \
+from documents is provisional: say so in feasibility_notes and tell the user the Architect will \
+check it against the linked source.
+- Only when no source is listed, mention that a project owner can connect one on the Sources page.
+
 Safety
 - Never ask for, repeat or store credentials (passwords, keys, connection strings). Data \
 sources are connected by project owners on the Sources page, where credentials are encrypted \

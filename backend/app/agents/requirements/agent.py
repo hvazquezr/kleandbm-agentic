@@ -21,7 +21,7 @@ from app.adapters.storage import ObjectStore
 from app.agents.requirements.prompt import SYSTEM_PROMPT
 from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext
 from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, stop_outcome
-from app.domain import documents, modeling, tenancy
+from app.domain import documents, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 from app.persistence.modeling import DataModel
@@ -39,6 +39,7 @@ def _context_block(session: Session, scope, conversation: Conversation, attachme
         model = session.get(DataModel, conversation.model_id)
         if model:
             lines.append(f"Data model: {model.name}" + (f" — {model.description}" if model.description else ""))
+    lines.append(_sources_line(session, scope, conversation))
     docs = documents.list_documents(session, scope)
     if docs:
         lines.append("Documents:")
@@ -57,6 +58,21 @@ def _context_block(session: Session, scope, conversation: Conversation, attachme
     if attachments:
         lines.append("Attached to this message: " + ", ".join(attachments))
     return "\n".join(lines)
+
+
+def _sources_line(session: Session, scope, conversation: Conversation) -> str:
+    """Which sources exist, by name only (never host, user or credentials). This agent has no
+    source tools; saying so stops it from guessing that none is connected."""
+    if conversation.model_id:
+        linked = [c for c in sources.model_sources(session, scope, conversation.model_id) if not c.disabled_at]
+        label = "Data sources linked to this model"
+    else:
+        linked = [c for c in sources.list_connections(session, scope) if not c.disabled_at]
+        label = "Data sources in this project"
+    if not linked:
+        return f"{label}: none yet."
+    names = ", ".join(f"{c.name} (MySQL database {c.database})" for c in linked)
+    return f"{label}: {names}. You can't query them; the Architect checks them when it designs."
 
 
 def _history(session: Session, conversation_id: uuid.UUID, upto_ordinal: int) -> list[dict[str, Any]]:

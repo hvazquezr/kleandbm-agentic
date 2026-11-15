@@ -195,11 +195,12 @@ def _write(ctx: ToolContext, ops: list) -> modeling.ChangesetResult:
     return result
 
 
-def _note_change(ctx: ToolContext, record_id: uuid.UUID) -> dict[str, str]:
+def _note_change(ctx: ToolContext, record_id: uuid.UUID, action: str) -> dict[str, str]:
     view = modeling.get_record(ctx.session, ctx.scope, record_id)
     entry = {"id": str(view.id), "code": view.code or "", "type": str(view.type)}
     ctx.changed.append(entry)
-    return entry
+    # The action is shown to the user ("Answered Q-001 · Added DEF-020"); it isn't stored.
+    return {**entry, "action": action}
 
 
 # --- Read tools -----------------------------------------------------------------------------
@@ -283,8 +284,21 @@ def get_registers(ctx: ToolContext, _: dict) -> dict:
                              **{k: (str(val) if isinstance(val, uuid.UUID) else val) for k, val in v.data.items()}})
     links = modeling.list_live_links(ctx.session, ctx.scope)
     out["links"] = [{"from_id": str(l.from_id), "to_id": str(l.to_id), "type": str(l.link_type)} for l in links]
-    counts = ", ".join(f"{len(out[k])} {k}" for k in keys.values())
-    return {**out, "summary": f"Read registers ({counts})"}
+    return {**out, "summary": f"Read registers ({_register_counts(out)})"}
+
+
+def _register_counts(out: dict[str, list]) -> str:
+    """'11 requirements, 19 definitions, 9 questions (8 answered, 1 deferred)'. Decisions belong
+    to the Architect, so they're shown only when there are some."""
+    parts = [f"{len(out['requirements'])} requirements", f"{len(out['definitions'])} definitions"]
+    by_status: dict[str, int] = {}
+    for q in out["questions"]:
+        by_status[str(q.get("status") or "open")] = by_status.get(str(q.get("status") or "open"), 0) + 1
+    detail = ", ".join(f"{by_status[s]} {s}" for s in ("open", "answered", "deferred", "resolved") if by_status.get(s))
+    parts.append(f"{len(out['questions'])} questions" + (f" ({detail})" if detail else ""))
+    if out["decisions"]:
+        parts.append(f"{len(out['decisions'])} decisions")
+    return ", ".join(parts)
 
 
 # --- Write tools ----------------------------------------------------------------------------
@@ -302,7 +316,7 @@ def record_requirement(ctx: ToolContext, args: dict) -> dict:
     if _none_if_empty(args.get("alternative_for_id")):
         ops.append(LinkOp(from_id="$r", to_id=_uuid(args["alternative_for_id"]), link_type=LinkType.ALTERNATIVE_FOR))
     result = _write(ctx, ops)
-    entry = _note_change(ctx, result.created["r"])
+    entry = _note_change(ctx, result.created["r"], "added")
     return {**entry, "summary": f"Recorded {entry['code']}: {args['statement'][:80]}"}
 
 
@@ -320,7 +334,7 @@ def record_definition(ctx: ToolContext, args: dict) -> dict:
     for other in args.get("conflicts_with_ids") or []:
         ops.append(LinkOp(from_id="$d", to_id=_uuid(other), link_type=LinkType.CONFLICTS_WITH))
     result = _write(ctx, ops)
-    entry = _note_change(ctx, result.created["d"])
+    entry = _note_change(ctx, result.created["d"], "added")
     scope = f" ({args['business_scope']})" if _none_if_empty(args.get("business_scope")) else ""
     return {**entry, "summary": f"Recorded {entry['code']}: {args['term']}{scope}"}
 
@@ -337,7 +351,12 @@ def update_entry(ctx: ToolContext, args: dict) -> dict:
     if not changes:
         raise ToolInputError("no fields to change")
     _write(ctx, [UpdateOp(id=record_id, expected_seq=int(args["expected_seq"]), data=changes)])
-    entry = _note_change(ctx, record_id)
+    status = changes.get("status")
+    action = status if status in ("answered", "deferred", "resolved") else "updated"
+    entry = _note_change(ctx, record_id, action)
+    label = {"answered": "Answered", "deferred": "Deferred", "resolved": "Resolved"}.get(action)
+    if label:
+        return {**entry, "summary": f"{label} {entry['code']}"}
     return {**entry, "summary": f"Updated {entry['code'] or entry['type']} ({', '.join(changes)})"}
 
 
@@ -351,7 +370,7 @@ def raise_question(ctx: ToolContext, args: dict) -> dict:
     for target in args.get("concerns_ids") or []:
         ops.append(LinkOp(from_id="$q", to_id=_uuid(target), link_type=LinkType.CONCERNS))
     result = _write(ctx, ops)
-    entry = _note_change(ctx, result.created["q"])
+    entry = _note_change(ctx, result.created["q"], "added")
     return {**entry, "summary": f"Raised {entry['code']}: {args['description'][:80]}"}
 
 

@@ -105,6 +105,7 @@ def test_agent_reads_documents_records_conflicting_definitions_and_asks(proj, db
     # The first model call saw the project context, including the attachment and documents.
     first = model.calls[0]["transcript"][-1]["text"]
     assert "<project_context>" in first and "northstar-notes.txt" in first and "Attached to this message" in first
+    assert "Data sources linked to this model: none yet." in first
     assert "record_definition" in model.calls[0]["tools"]
 
     # Registers: both meanings kept, unconfirmed, linked as conflicting, with a question.
@@ -274,3 +275,54 @@ def test_tool_schemas_fit_strict_mode():
         if isinstance(node.get("type"), list) or "anyOf" in node
     )
     assert unions <= 16, f"{unions} union-typed parameters; strict mode allows 16"
+
+
+def test_context_names_linked_sources_without_connection_details(proj, monkeypatch):
+    """The agent can't query sources, but it's told which are linked so it never claims none is."""
+    from cryptography.fernet import Fernet
+
+    from tests.test_sources import FakeConnector
+
+    monkeypatch.setattr(get_settings(), "secrets_key", Fernet.generate_key().decode())
+    proj.client.app.state.source_connector = FakeConnector()
+    source = proj.alice.post(f"{proj.base}/sources", json={
+        "name": "Northstar system", "host": "127.0.0.1", "port": 3306, "database": "northstar_ops",
+        "username": "northstar_ro", "password": "s3cret-pw"}).json()
+    assert proj.alice.put(f"{proj.base}/models/{proj.model}/sources/{source['id']}").status_code == 204
+
+    model = proj.script({"text": "Noted."})
+    assert proj.send(proj.alice, "Is the database connected?").status_code == 200
+    first = model.calls[0]["transcript"][-1]["text"]
+    assert "Data sources linked to this model: Northstar system (MySQL database northstar_ops)." in first
+    assert "the Architect checks them" in first
+    for secret in ("127.0.0.1", "northstar_ro", "s3cret-pw"):
+        assert secret not in first
+
+
+def test_answers_are_shown_as_answered_and_counted_by_status(proj):
+    """Answers land on questions, not in Decisions; the chat says which were answered."""
+    proj.script(
+        {"tool_calls": [{"name": "raise_question", "input": {
+            "kind": "clarification", "description": "Does 'by store' include the Web outlet?",
+            "impact": "", "is_blocking": False, "proposed_action": "", "concerns_ids": []}}]},
+        lambda t: {"tool_calls": [{"name": "update_entry", "input": {
+            "record_id": tool_result(t)["id"], "expected_seq": modeling_seq(proj), "statement": "",
+            "definition": "", "business_scope": "", "origin_ref": "", "feasibility_status": "unchanged",
+            "feasibility_notes": "", "question_status": "answered",
+            "resolution": "User (chat): \"Store should include the Web outlet.\""}}]},
+        {"tool_calls": [{"name": "get_registers", "input": {}}]},
+        {"text": "Recorded your answer on Q-001."},
+    )
+    events = sse(proj.send(proj.alice, "Yes, include Web."))
+    oks = [e for e in events if e["type"] == "tool" and e["status"] == "ok"]
+    assert [e["record"]["action"] for e in oks[:2]] == ["added", "answered"]
+    assert oks[1]["summary"] == "Answered Q-001"
+    # Decisions belong to the Architect, so an empty Decisions register isn't mentioned.
+    assert oks[2]["summary"] == "Read registers (0 requirements, 0 definitions, 1 questions (1 answered))"
+    stored = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]["activity"]
+    assert stored[1]["record"]["action"] == "answered"
+
+
+def modeling_seq(proj) -> int:
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    return next(q["seq"] for q in snap["questions"] if q["code"] == "Q-001")

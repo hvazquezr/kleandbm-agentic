@@ -12,7 +12,8 @@ export type AgentEvent =
       status: "started" | "ok" | "error";
       name: string;
       summary?: string;
-      record?: { id: string; code: string; type: string } | null;
+      /** action: what happened to the record (added, answered, deferred, resolved, updated). */
+      record?: { id: string; code: string; type: string; action?: string } | null;
       /** Set when a subgraph the Architect called (a consultation or a review) made the call. */
       agent?: "business_requirements" | "validator";
     }

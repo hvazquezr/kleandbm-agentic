@@ -423,7 +423,7 @@ def record_decision(ctx: ArchitectContext, args: dict) -> dict:
             elements = design.link_decision(ctx.candidate, decision_id, args["affects_elements"])
         except InvalidOperation as exc:
             raise ToolInputError(f"{exc} (the decision was not recorded)") from exc
-    entry = rt._note_change(ctx, decision_id)
+    entry = rt._note_change(ctx, decision_id, "added")
     return {**entry, "elements": elements, "summary": f"Recorded {entry['code']}: {args['statement'][:80]}"}
 
 
@@ -435,7 +435,7 @@ def update_feasibility(ctx: ArchitectContext, args: dict) -> dict:
         "feasibility_status": FeasibilityStatus(args["feasibility_status"]).value,
         "feasibility_notes": _none_if_empty(args.get("feasibility_notes")),
     })])
-    entry = rt._note_change(ctx, rid)
+    entry = rt._note_change(ctx, rid, "updated")
     return {**entry, "summary": f"{entry['code']} feasibility: {args['feasibility_status'].replace('_', ' ')}"}
 
 
