@@ -286,7 +286,8 @@ def test_only_register_entries_linked_to_the_model_reset_it(proj):
     created = proj.cs(proj.alice, star_schema_ops()).json()["created"]
     regs = proj.cs(proj.alice, [
         {"op": "create", "type": "requirement", "ref": "r", "data": {"statement": "Sales by customer", "origin_kind": "user_statement"}},
-        {"op": "create", "type": "definition", "ref": "d", "data": {"term": "Sales", "provenance": "inferred"}},
+        {"op": "create", "type": "definition", "ref": "d", "data": {"term": "Sales", "provenance": "user_stated",
+                                                                     "confirmation_status": "confirmed"}},
         {"op": "link", "from_id": "$r", "to_id": created["fact"], "link_type": "maps_to"},
         {"op": "link", "from_id": "$r", "to_id": "$d", "link_type": "uses_definition"},
     ], model_id=None).json()["created"]
@@ -343,6 +344,73 @@ def test_only_register_entries_linked_to_the_model_reset_it(proj):
     mapping = next(l for l in proj.snap()["links"] if l["from_id"] == regs["r"] and l["link_type"] == "maps_to")
     assert proj.cs(proj.alice, [{"op": "unlink", "link_id": mapping["id"]}], model_id=None).status_code == 201
     assert state() == "draft"
+
+
+def test_acceptance_needs_dependent_definitions_confirmed_or_excepted(proj):
+    """Ready for Review doesn't need confirmed meanings; Accepted does, or a person names each
+    unconfirmed definition as an exception with a note (spec §7)."""
+    created = proj.cs(proj.alice, star_schema_ops()).json()["created"]
+    regs = proj.cs(proj.alice, [
+        {"op": "create", "type": "requirement", "ref": "r", "data": {"statement": "Sales by customer", "origin_kind": "user_statement"}},
+        {"op": "create", "type": "definition", "ref": "sales", "data": {"term": "Sales", "provenance": "documented"}},
+        {"op": "create", "type": "definition", "ref": "net", "data": {"term": "Net sales", "provenance": "inferred"}},
+        {"op": "create", "type": "definition", "ref": "cust", "data": {"term": "Customer", "provenance": "user_stated",
+                                                                        "confirmation_status": "confirmed"}},
+        {"op": "create", "type": "definition", "ref": "other", "data": {"term": "Stock", "provenance": "inferred"}},
+        {"op": "link", "from_id": "$r", "to_id": created["fact"], "link_type": "maps_to"},
+        {"op": "link", "from_id": "$r", "to_id": "$sales", "link_type": "uses_definition"},
+        {"op": "link", "from_id": "$sales", "to_id": "$net", "link_type": "conflicts_with"},
+        {"op": "link", "from_id": created["dim"], "to_id": "$cust", "link_type": "uses_definition"},
+    ], model_id=None).json()["created"]
+    surl = f"{proj.base}/models/{proj.model}/state"
+
+    deps = proj.alice.get(f"{proj.base}/models/{proj.model}/definition-dependencies").json()
+    by_term = {d["term"]: d for d in deps}
+    # The unrelated Stock definition isn't a dependency.
+    assert set(by_term) == {"Sales", "Net sales", "Customer"}
+    assert by_term["Sales"]["reasons"] == [f"used by requirement {proj.alice.get(f'{proj.base}/records/{regs['r']}').json()['code']}"]
+    assert by_term["Net sales"]["reasons"][0].startswith("conflicts with")
+    assert by_term["Customer"]["reasons"] == ["used by dim_customer"]
+
+    assert proj.alice.post(surl, json={"state": "ready_for_review"}).status_code == 200
+    refused = proj.alice.post(surl, json={"state": "accepted"})
+    assert refused.status_code == 409
+    assert "Sales" in refused.json()["detail"] and "Net sales" in refused.json()["detail"]
+    assert "Customer" not in refused.json()["detail"]
+    # Exceptions must cover every open one, name only dependencies, and come with a note.
+    partial = proj.alice.post(surl, json={"state": "accepted", "note": "ok", "exceptions": [regs["sales"]]})
+    assert partial.status_code == 409 and "Net sales" in partial.json()["detail"]
+    stranger = proj.alice.post(surl, json={"state": "accepted", "note": "ok",
+                                           "exceptions": [regs["sales"], regs["net"], regs["other"]]})
+    assert stranger.status_code == 409 and "exceptions must be" in stranger.json()["detail"]
+    silent = proj.alice.post(surl, json={"state": "accepted", "exceptions": [regs["sales"], regs["net"]]})
+    assert silent.status_code == 409 and "note" in silent.json()["detail"]
+    # Exceptions only mean something when accepting.
+    assert proj.alice.post(surl, json={"state": "ready_for_review", "exceptions": [regs["sales"]]}).status_code == 409
+    assert proj.alice.get(surl).json()["effective_state"] == "ready_for_review"
+
+    accepted = proj.alice.post(surl, json={"state": "accepted", "note": "Finance confirms gross next sprint",
+                                           "exceptions": [regs["sales"], regs["net"]]})
+    assert accepted.status_code == 200, accepted.text
+    event = accepted.json()["last_event"]
+    assert {e["term"] for e in event["exceptions"]} == {"Sales", "Net sales"}
+    assert proj.alice.get(f"{surl}/history").json()[0]["exceptions"] == event["exceptions"]
+
+    # Rejecting the conflicting meaning settles it; confirming Sales then needs no exceptions.
+    def seq_of(rid):
+        return proj.alice.get(f"{proj.base}/records/{rid}").json()["seq"]
+    assert proj.cs(proj.alice, [
+        {"op": "update", "id": regs["net"], "expected_seq": seq_of(regs["net"]), "data": {"confirmation_status": "rejected"}},
+        {"op": "update", "id": regs["sales"], "expected_seq": seq_of(regs["sales"]), "data": {"confirmation_status": "confirmed"}},
+    ], model_id=None).status_code == 201
+    assert proj.alice.get(surl).json()["effective_state"] == "draft"
+    assert proj.alice.post(surl, json={"state": "accepted"}).status_code == 200
+
+    # A rejected definition the model still uses can't be excepted.
+    assert proj.cs(proj.alice, [{"op": "update", "id": regs["sales"], "expected_seq": seq_of(regs["sales"]),
+                                 "data": {"confirmation_status": "rejected"}}], model_id=None).status_code == 201
+    used_rejected = proj.alice.post(surl, json={"state": "accepted", "note": "x", "exceptions": [regs["sales"]]})
+    assert used_rejected.status_code == 409 and "rejected definitions" in used_rejected.json()["detail"]
 
 
 # --- Scope and permissions ------------------------------------------------------------------

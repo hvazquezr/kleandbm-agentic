@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, aliased
 from app.domain.access import ActorKind, NotFoundInScope, Permission, ProjectScope
 from app.domain.records import (
     CODE_PREFIXES,
+    ConfirmationStatus,
     LINK_RULES,
     MODEL_SCOPED_TYPES,
     PATCHES,
@@ -132,6 +133,18 @@ class StateEventView:
     by_name: str | None
     note: str | None
     at: dt.datetime
+    # Unconfirmed definitions the person accepted the model with, as {definition_id, code,
+    # term, seq}. Only on Accepted events.
+    exceptions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DefinitionDependency:
+    """A definition the model depends on, and why: an element, check or mapped requirement
+    uses it, a check of the model reviews it, or it conflicts with one that does."""
+
+    definition: RecordView
+    reasons: list[str]
 
 
 @dataclass(frozen=True)
@@ -965,20 +978,30 @@ def set_state(
     model_id: uuid.UUID,
     state: ModelState,
     note: str | None = None,
+    exceptions: Iterable[uuid.UUID] = (),
 ) -> ModelStateView:
     """Record a lifecycle transition against the current watermark.
 
-    Acceptance needs approval authority, which agents never hold. Readiness gating on
-    validation results (spec §6) belongs to the agent workflow in P4.
+    Acceptance needs approval authority, which agents never hold, and every definition the
+    model depends on must be confirmed by a person or named in ``exceptions`` (accepted as an
+    assumption, with a note saying why). A rejected definition the model still uses can't be
+    excepted. Ready for Review doesn't need confirmed definitions; unconfirmed meanings stay
+    listed for the reviewer (spec §7).
     """
     get_model(session, scope, model_id)
+    exceptions = list(dict.fromkeys(exceptions))
     if state is ModelState.ACCEPTED:
         scope.require(Permission.PROJECT_APPROVE)
     else:
         scope.require(Permission.PROJECT_EDIT)
+        if exceptions:
+            raise InvalidOperation("definition exceptions apply only when accepting a model")
     seq = current_seq(session, scope) or None
     if state is not ModelState.DRAFT and seq is None:
         raise InvalidOperation(f"an empty model cannot be {state}")
+    accepted: list[dict[str, Any]] = []
+    if state is ModelState.ACCEPTED:
+        accepted = _acceptance_exceptions(session, scope, model_id, exceptions, note)
     actor = scope.actor
     session.add(
         ModelStateEvent(
@@ -991,10 +1014,92 @@ def set_state(
             actor_id=actor.id,
             on_behalf_of=actor.on_behalf_of,
             note=note,
+            accepted_exceptions=accepted,
         )
     )
     session.flush()
     return get_state(session, scope, model_id)
+
+
+def _label(d: RecordView) -> str:
+    return f"{d.code} {d.data['term']}" if d.code else d.data["term"]
+
+
+def _acceptance_exceptions(
+    session: Session, scope: ProjectScope, model_id: uuid.UUID, exceptions: list[uuid.UUID], note: str | None,
+) -> list[dict[str, Any]]:
+    open_: dict[uuid.UUID, RecordView] = {}
+    rejected: list[str] = []
+    for dep in definition_dependencies(session, scope, model_id):
+        status = dep.definition.data["confirmation_status"]
+        if status == ConfirmationStatus.REJECTED:
+            rejected.append(_label(dep.definition))
+        elif status != ConfirmationStatus.CONFIRMED:
+            open_[dep.definition.id] = dep.definition
+    if rejected:
+        raise InvalidOperation("the model still uses rejected definitions: " + ", ".join(rejected)
+                               + "; revise the model or the requirements before accepting it")
+    unknown = [str(i) for i in exceptions if i not in open_]
+    if unknown:
+        raise InvalidOperation("exceptions must be unconfirmed definitions the model depends on: "
+                               + ", ".join(unknown))
+    missing = [_label(d) for i, d in open_.items() if i not in exceptions]
+    if missing:
+        raise InvalidOperation("the model depends on unconfirmed definitions: " + ", ".join(missing)
+                               + "; confirm them or accept them as exceptions")
+    if exceptions and not (note and note.strip()):
+        raise InvalidOperation("accepting with definition exceptions needs a note saying why")
+    return [{"definition_id": str(i), "code": open_[i].code, "term": open_[i].data["term"],
+             "seq": open_[i].seq} for i in exceptions]
+
+
+def definition_dependencies(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> list[DefinitionDependency]:
+    """The definitions the model depends on now: those its elements and checks use, those its
+    mapped requirements use, those its checks review, and those that conflict with any of them
+    (unless the conflicting one is rejected). Live links and records only."""
+    scope.require(Permission.PROJECT_READ)
+    get_model(session, scope, model_id)
+    seq = current_seq(session, scope)
+    elements: dict[uuid.UUID, str] = {}
+    tables = {v.id: v.data["name"] for v in _latest(
+        session, scope, RecordType.TABLE, as_of=seq, model_id=model_id, model_filter=True)}
+    elements.update(tables)
+    for v in _latest(session, scope, RecordType.ATTRIBUTE, as_of=seq, model_id=model_id, model_filter=True):
+        elements[v.id] = f"{tables.get(v.data['table_id'], '?')}.{v.data['name']}"
+    for v in _latest(session, scope, RecordType.RELATIONSHIP, as_of=seq, model_id=model_id, model_filter=True):
+        elements[v.id] = "a relationship"
+    checks = {v.id: v.data.get("issue_key") or v.code or "a check" for v in _latest(
+        session, scope, RecordType.CHECK, as_of=seq, model_id=model_id, model_filter=True)}
+    requirements = {v.id: v for v in _latest(session, scope, RecordType.REQUIREMENT, as_of=seq)}
+    definitions = {v.id: v for v in _latest(session, scope, RecordType.DEFINITION, as_of=seq)}
+    links = list_live_links(session, scope)
+    users: dict[uuid.UUID, str] = {i: f"used by {n}" for i, n in elements.items()}
+    users |= {i: f"used by check {n}" for i, n in checks.items()}
+    for l in links:
+        if l.link_type is LinkType.MAPS_TO and l.to_id in elements and l.from_id in requirements:
+            r = requirements[l.from_id]
+            users[r.id] = f"used by requirement {r.code or r.data['statement'][:60]}"
+    reasons: dict[uuid.UUID, list[str]] = {}
+
+    def add(def_id: uuid.UUID, reason: str) -> None:
+        if def_id in definitions and reason not in reasons.setdefault(def_id, []):
+            reasons[def_id].append(reason)
+
+    for l in links:
+        if l.link_type is LinkType.USES_DEFINITION and l.from_id in users:
+            add(l.to_id, users[l.from_id])
+        elif l.link_type is LinkType.CHECKS and l.from_id in checks:
+            add(l.to_id, f"reviewed by check {checks[l.from_id]}")
+    used = {i: definitions[i] for i in reasons}
+    for l in links:
+        if l.link_type is not LinkType.CONFLICTS_WITH:
+            continue
+        for a, b in ((l.from_id, l.to_id), (l.to_id, l.from_id)):
+            if a in used and b in definitions and b not in used \
+                    and definitions[b].data["confirmation_status"] != ConfirmationStatus.REJECTED:
+                add(b, f"conflicts with {_label(used[a])}")
+    return sorted((DefinitionDependency(definitions[i], r) for i, r in reasons.items()),
+                  key=lambda d: (d.definition.code or "", d.definition.data["term"]))
 
 
 def get_state(session: Session, scope: ProjectScope, model_id: uuid.UUID) -> ModelStateView:
@@ -1114,4 +1219,5 @@ def _event_view(session: Session, event: ModelStateEvent) -> StateEventView:
         by_name=(user.display_name or user.email) if user else None,
         note=event.note,
         at=event.created_at,
+        exceptions=list(event.accepted_exceptions or []),
     )

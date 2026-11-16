@@ -454,6 +454,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/definition-dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Definition Dependencies
+         * @description Definitions the model depends on and why; accepting it needs each one confirmed or
+         *     accepted as an exception.
+         */
+        get: operations["get_definition_dependencies_tenants__tenant_id__projects__project_id__models__model_id__definition_dependencies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/layout": {
         parameters: {
             query?: never;
@@ -1167,6 +1188,26 @@ export interface components {
             /** Origin Ref */
             origin_ref?: string | null;
             provenance: components["schemas"]["DefinitionProvenance"];
+            /** Term */
+            term: string;
+        };
+        /** DefinitionDependencyOut */
+        DefinitionDependencyOut: {
+            /** Code */
+            code: string | null;
+            /** Confirmation Status */
+            confirmation_status: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provenance */
+            provenance: string;
+            /** Reasons */
+            reasons: string[];
+            /** Seq */
+            seq: number;
             /** Term */
             term: string;
         };
@@ -1959,6 +2000,13 @@ export interface components {
             at: string;
             /** By Name */
             by_name: string | null;
+            /**
+             * Exceptions
+             * @default []
+             */
+            exceptions: {
+                [key: string]: unknown;
+            }[];
             /** Note */
             note: string | null;
             /** Seq */
@@ -1967,6 +2015,8 @@ export interface components {
         };
         /** StateIn */
         StateIn: {
+            /** Exceptions */
+            exceptions?: string[];
             /** Note */
             note?: string | null;
             state: components["schemas"]["ModelState"];
@@ -3217,6 +3267,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidateSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_definition_dependencies_tenants__tenant_id__projects__project_id__models__model_id__definition_dependencies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefinitionDependencyOut"][];
                 };
             };
             /** @description Validation Error */

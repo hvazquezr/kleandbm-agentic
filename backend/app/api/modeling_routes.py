@@ -80,6 +80,18 @@ class StateEventOut(BaseModel):
     by_name: str | None
     note: str | None
     at: datetime
+    # Unconfirmed definitions accepted as exceptions: {definition_id, code, term, seq}.
+    exceptions: list[dict[str, Any]] = []
+
+
+class DefinitionDependencyOut(BaseModel):
+    id: uuid.UUID
+    code: str | None
+    term: str
+    provenance: str
+    confirmation_status: str
+    seq: int
+    reasons: list[str]
 
 
 class StateOut(BaseModel):
@@ -169,6 +181,8 @@ class VersionOut(BaseModel):
 class StateIn(BaseModel):
     state: ModelState
     note: str | None = Field(default=None, max_length=4000)
+    # Accepting only: unconfirmed definitions the model depends on, accepted as assumptions.
+    exceptions: list[uuid.UUID] = Field(default_factory=list, max_length=200)
 
 
 _SNAPSHOT_KEYS = {
@@ -207,7 +221,7 @@ def _state_out(state: modeling.ModelStateView) -> StateOut:
 
 def _event_out(e: modeling.StateEventView) -> StateEventOut:
     return StateEventOut(state=e.state, seq=e.seq, actor_kind=e.actor_kind.value, by_name=e.by_name,
-                         note=e.note, at=e.at)
+                         note=e.note, at=e.at, exceptions=e.exceptions)
 
 
 # --- Routes ---------------------------------------------------------------------------------
@@ -319,4 +333,21 @@ def get_state_history(model_id: uuid.UUID, session: SessionDep, scope: ProjectSc
 def set_state(
     model_id: uuid.UUID, body: StateIn, session: SessionDep, scope: ProjectScopeDep
 ) -> StateOut:
-    return _state_out(modeling.set_state(session, scope, model_id, body.state, body.note))
+    return _state_out(modeling.set_state(session, scope, model_id, body.state, body.note, body.exceptions))
+
+
+@router.get("/models/{model_id}/definition-dependencies")
+def get_definition_dependencies(
+    model_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep
+) -> list[DefinitionDependencyOut]:
+    """Definitions the model depends on and why; accepting it needs each one confirmed or
+    accepted as an exception."""
+    return [
+        DefinitionDependencyOut(
+            id=d.definition.id, code=d.definition.code, term=d.definition.data["term"],
+            provenance=str(d.definition.data["provenance"]),
+            confirmation_status=str(d.definition.data["confirmation_status"]),
+            seq=d.definition.seq, reasons=d.reasons,
+        )
+        for d in modeling.definition_dependencies(session, scope, model_id)
+    ]

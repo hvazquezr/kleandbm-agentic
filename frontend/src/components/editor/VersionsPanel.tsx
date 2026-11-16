@@ -2,7 +2,9 @@ import { CheckCircle2, Eye, History, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { ModelState, Snapshot } from "@/api/client";
-import { useCreateVersion, useSetState, useStateHistory, useVersions, type ProjectPath } from "@/api/hooks";
+import {
+  useCreateVersion, useDefinitionDependencies, useSetState, useStateHistory, useVersions, type ProjectPath,
+} from "@/api/hooks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { STATE_LABELS } from "@/lib/labels";
@@ -29,27 +31,40 @@ export function VersionsPanel({
   const createVersion = useCreateVersion(path, modelId);
   const setState = useSetState(path, modelId);
   const lifecycle = useStateHistory(path, modelId);
+  const deps = useDefinitionDependencies(path, modelId);
   const [name, setName] = useState("");
+  const [excepted, setExcepted] = useState<Set<string>>(new Set());
   const [ask, confirmDialog] = useConfirm();
   const state = snapshot.state;
   // State changes and new versions always apply to the latest seq, so they're hidden while
   // an older version is on screen. Otherwise you could accept something you aren't looking at.
   const viewingPast = viewingSeq !== undefined;
 
+  // Accepting needs every definition the model depends on confirmed by a person, or named as
+  // an exception (accepted as an assumption, with a note). Rejected ones must be fixed first.
+  const openDefs = (deps.data ?? []).filter((d) => d.confirmation_status === "unconfirmed");
+  const rejectedDefs = (deps.data ?? []).filter((d) => d.confirmation_status === "rejected");
+  const exceptions = openDefs.filter((d) => excepted.has(d.id)).map((d) => d.id);
+  const acceptBlocked = rejectedDefs.length > 0 || exceptions.length < openDefs.length;
+
   const transition = async (next: ModelState) => {
     let note: string | undefined;
     if (next === "accepted") {
       const entered = await ask({
         title: `Accept the model at seq ${snapshot.current_seq}?`,
-        description: "Acceptance is recorded against this version. Any later change returns the model to Draft.",
-        inputLabel: "Acceptance note (optional)",
+        description: exceptions.length
+          ? `You're accepting ${exceptions.length} unconfirmed definition${exceptions.length > 1 ? "s" : ""} as exceptions. Say why; the note is kept with the acceptance. Any later change returns the model to Draft.`
+          : "Acceptance is recorded against this version. Any later change returns the model to Draft.",
+        inputLabel: exceptions.length ? "Why these definitions can stay unconfirmed (required)" : "Acceptance note (optional)",
+        inputRequired: exceptions.length > 0,
         confirmLabel: "Accept",
       });
       if (entered === null) return;
       note = entered.trim() || undefined;
     }
     try {
-      await setState.mutateAsync({ state: next, note });
+      await setState.mutateAsync({ state: next, note, exceptions: next === "accepted" ? exceptions : undefined });
+      setExcepted(new Set());
       toast.success(`Model marked ${STATE_LABELS[next]}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not change state");
@@ -79,11 +94,45 @@ export function VersionsPanel({
             </Button>
           )}
           {canApprove && state.effective_state !== "accepted" && snapshot.current_seq > 0 && (
-            <Button size="sm" onClick={() => transition("accepted")}>
+            <Button size="sm" disabled={acceptBlocked} onClick={() => transition("accepted")}>
               <CheckCircle2 className="size-4" /> Accept at seq {snapshot.current_seq}
             </Button>
           )}
         </div>
+        {!viewingPast && state.effective_state !== "accepted" && (openDefs.length > 0 || rejectedDefs.length > 0) && (
+          <div className="rounded-md border border-amber-500/40 p-2.5 space-y-2">
+            <p className="text-xs">
+              {rejectedDefs.length > 0
+                ? "The model still uses rejected definitions. Revise the model or its requirements before accepting it."
+                : canApprove
+                  ? "These definitions aren't confirmed yet. Confirm them in Registers, or tick each one to accept it as an exception."
+                  : "These definitions need confirming before the model can be accepted."}
+            </p>
+            <ul className="space-y-1.5">
+              {[...rejectedDefs, ...openDefs].map((d) => (
+                <li key={d.id} className="text-xs">
+                  <label className="flex items-start gap-2">
+                    {d.confirmation_status === "unconfirmed" && canApprove && (
+                      <input type="checkbox" className="mt-0.5" checked={excepted.has(d.id)}
+                        onChange={(e) => setExcepted((prev) => {
+                          const nextSet = new Set(prev);
+                          if (e.target.checked) nextSet.add(d.id); else nextSet.delete(d.id);
+                          return nextSet;
+                        })} />
+                    )}
+                    <span className="min-w-0">
+                      <span className="font-medium">{d.code ? `${d.code} ` : ""}{d.term}</span>{" "}
+                      <span className={d.confirmation_status === "rejected" ? "text-destructive" : "text-amber-500"}>
+                        {d.confirmation_status}
+                      </span>
+                      <span className="text-muted-foreground"> · {d.provenance.replace("_", " ")} · {d.reasons.join("; ")}</span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       {!!lifecycle.data?.length && (
@@ -103,6 +152,11 @@ export function VersionsPanel({
                     : `By ${e.by_name ?? "a project member (no name on file)"}`}
                 </div>
                 {e.note && <div className="text-xs mt-0.5">“{e.note}”</div>}
+                {!!e.exceptions?.length && (
+                  <div className="text-xs mt-0.5 text-amber-500">
+                    Accepted with unconfirmed: {e.exceptions.map((x) => String(x.code ?? x.term)).join(", ")}
+                  </div>
+                )}
               </li>
             ))}
           </ol>

@@ -162,10 +162,24 @@ export function useCreateVersion(path: ProjectPath, modelId: string) {
   });
 }
 
+/** Definitions the model depends on; accepting it needs each confirmed or excepted. Keyed
+ * under the snapshot so every changeset refreshes it. */
+export function useDefinitionDependencies(path: ProjectPath, modelId: string) {
+  return useQuery({
+    queryKey: [...keys.snapshot(path, modelId), "definition-dependencies"],
+    queryFn: () =>
+      unwrap(
+        api.GET("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/definition-dependencies", {
+          params: { path: { ...path, model_id: modelId } },
+        }),
+      ),
+  });
+}
+
 export function useSetState(path: ProjectPath, modelId: string) {
   const invalidate = useInvalidateProjectData(path);
   return useMutation({
-    mutationFn: (body: { state: ModelState; note?: string }) =>
+    mutationFn: (body: { state: ModelState; note?: string; exceptions?: string[] }) =>
       unwrap(
         api.POST("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/state", {
           params: { path: { ...path, model_id: modelId } },

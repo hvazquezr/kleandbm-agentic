@@ -10,6 +10,8 @@ type Request = {
   destructive?: boolean;
   /** When set, the dialog asks for optional text and resolves with it. */
   inputLabel?: string;
+  /** The text can't be left empty. */
+  inputRequired?: boolean;
 };
 
 /**
@@ -50,7 +52,8 @@ export function useConfirm(): [(r: Request) => Promise<string | null>, React.Rea
         )}
         <DialogFooter>
           <Button variant="ghost" onClick={() => finish(null)}>Cancel</Button>
-          <Button variant={request?.destructive ? "destructive" : "default"} onClick={() => finish(text)}>
+          <Button variant={request?.destructive ? "destructive" : "default"} disabled={!!request?.inputRequired && !text.trim()}
+            onClick={() => finish(text)}>
             {request?.confirmLabel ?? "Confirm"}
           </Button>
         </DialogFooter>

@@ -39,6 +39,7 @@ ROUTES: list[tuple[str, str, dict | None]] = [
     ("GET", "/models/{model}/state", None),
     ("POST", "/models/{model}/state", {"state": "ready_for_review"}),
     ("GET", "/models/{model}/state/history", None),
+    ("GET", "/models/{model}/definition-dependencies", None),
     ("PUT", "/models/{model}/layout", {"positions": [{"record_id": "{table}", "x": 1, "y": 2}]}),
     ("GET", "/models/{model}/candidates", None),
     ("GET", "/models/{model}/sources", None),

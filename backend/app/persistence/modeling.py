@@ -421,6 +421,11 @@ class ModelStateEvent(Base):
     actor_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     on_behalf_of: Mapped[uuid.UUID | None] = mapped_column()
     note: Mapped[str | None] = mapped_column(String(4000))
+    # Unconfirmed definitions accepted as exceptions on an Accepted event (spec §7):
+    # [{definition_id, code, term, seq}]. Empty for every other event.
+    accepted_exceptions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -1231,6 +1231,60 @@
         "title": "DefinitionData",
         "type": "object"
       },
+      "DefinitionDependencyOut": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "confirmation_status": {
+            "title": "Confirmation Status",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "term",
+          "provenance",
+          "confirmation_status",
+          "seq",
+          "reasons"
+        ],
+        "title": "DefinitionDependencyOut",
+        "type": "object"
+      },
       "DefinitionKind": {
         "enum": [
           "term",
@@ -3384,6 +3438,15 @@
             ],
             "title": "By Name"
           },
+          "exceptions": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Exceptions",
+            "type": "array"
+          },
           "note": {
             "anyOf": [
               {
@@ -3423,6 +3486,15 @@
       },
       "StateIn": {
         "properties": {
+          "exceptions": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Exceptions",
+            "type": "array"
+          },
           "note": {
             "anyOf": [
               {
@@ -5997,6 +6069,79 @@
         "summary": "List Candidates",
         "tags": [
           "design"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/definition-dependencies": {
+      "get": {
+        "description": "Definitions the model depends on and why; accepting it needs each one confirmed or\naccepted as an exception.",
+        "operationId": "get_definition_dependencies_tenants__tenant_id__projects__project_id__models__model_id__definition_dependencies_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DefinitionDependencyOut"
+                  },
+                  "title": "Response Get Definition Dependencies Tenants  Tenant Id  Projects  Project Id  Models  Model Id  Definition Dependencies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Definition Dependencies",
+        "tags": [
+          "modeling"
         ]
       }
     },
