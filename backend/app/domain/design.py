@@ -496,6 +496,38 @@ def is_stale(session: Session, scope: ProjectScope, candidate: DesignCandidate) 
     ))
 
 
+def register_ids(candidate: DesignCandidate) -> set[uuid.UUID]:
+    """Register entries the candidate refers to: mapped requirements, linked decisions, the
+    questions its searches raised, and the questions and requirements its findings name."""
+    content = candidate.content
+    ids: set[str] = {m["requirement_id"] for m in content.get("mappings", [])}
+    ids |= {d["decision_id"] for d in content.get("decision_links", [])}
+    ids |= {s["question_id"] for s in content.get("searches", []) if s.get("question_id")}
+    for f in latest_findings(candidate) or []:
+        ids.update(f.get("question_ids") or [])
+        ids.update(f.get("requirement_ids") or [])
+    out = set()
+    for i in ids:
+        try:
+            out.add(uuid.UUID(str(i)))
+        except ValueError:
+            continue
+    return out
+
+
+def review_outdated(session: Session, scope: ProjectScope, candidate: DesignCandidate) -> bool:
+    """Whether a register entry the design depends on changed after the Architect proposed it,
+    so its review describes requirements that may no longer hold. The candidate's own apply
+    changeset and the decision-point resolutions for its searches don't count."""
+    if candidate.proposed_seq is None or candidate.status not in (CandidateStatus.PROPOSED, CandidateStatus.APPLIED):
+        return False
+    ignore = {candidate.applied_seq} if candidate.applied_seq else set()
+    ignore |= {r["seq"] for r in search_resolutions(session, scope, candidate).values() if r.get("seq")}
+    return modeling.registers_changed_since(
+        session, scope, candidate.model_id, candidate.proposed_seq,
+        also=register_ids(candidate), ignore_seqs=ignore)
+
+
 def _table_data(t: dict[str, Any]) -> dict[str, Any]:
     return {f: t.get(f) for f in TABLE_FIELDS}
 
@@ -636,7 +668,12 @@ def search_resolutions(session: Session, scope: ProjectScope, candidate: DesignC
 
 
 def candidate_readiness(session: Session, scope: ProjectScope, candidate: DesignCandidate) -> tuple[bool, list[str]]:
-    return readiness(candidate, search_resolutions(session, scope, candidate))
+    ready, blockers = readiness(candidate, search_resolutions(session, scope, candidate))
+    if review_outdated(session, scope, candidate):
+        blockers.append("review out of date: requirements, definitions, questions or decisions this design "
+                        "depends on changed after it was reviewed; ask the Architect to revise it")
+        ready = False
+    return ready, blockers
 
 
 def readiness(candidate: DesignCandidate, resolutions: dict[str, dict[str, Any]] | None = None) -> tuple[bool, list[str]]:

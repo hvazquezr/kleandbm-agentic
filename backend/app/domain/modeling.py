@@ -8,6 +8,7 @@ watermark (spec §7, "Version history mechanism").
 import datetime as dt
 import uuid
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
@@ -1029,11 +1030,21 @@ def _changed_since(session: Session, scope: ProjectScope, model_id: uuid.UUID, s
             Changeset.project_id == scope.project_id, Changeset.seq > seq, Changeset.model_id == model_id))
     if own:
         return True
+    return registers_changed_since(session, scope, model_id, seq)
+
+
+def registers_changed_since(
+    session: Session, scope: ProjectScope, model_id: uuid.UUID, seq: int, *,
+    also: Iterable[uuid.UUID] = (), ignore_seqs: Iterable[int] = (),
+) -> bool:
+    """Whether a register entry that shapes the model changed after ``seq``, or a link to one
+    was added or removed. The entries are those linked to the model's elements and checks, plus
+    ``also`` (entries a design candidate refers to before its links exist), and what shapes
+    them transitively through register entries. Changesets in ``ignore_seqs`` don't count."""
+    ignore = set(ignore_seqs)
     model_records = set(session.scalars(
         select(Record.id).where(Record.project_id == scope.project_id, Record.model_id == model_id)))
-    if not model_records:
-        return False
-    # Links in effect at the event or added since; a link removed since is a change in itself.
+    # Links in effect at the watermark or added since; a link removed since is a change in itself.
     links = list(session.scalars(select(RecordLink).where(
         RecordLink.project_id == scope.project_id,
         (RecordLink.removed_seq.is_(None)) | (RecordLink.removed_seq > seq))))
@@ -1043,6 +1054,9 @@ def _changed_since(session: Session, scope: ProjectScope, model_id: uuid.UUID, s
     # Entries linked directly to the model's elements and checks, in either direction.
     linked = {l.to_id if l.from_id in model_records else l.from_id for l in links
               if (l.from_id in model_records) != (l.to_id in model_records)} & registers
+    linked |= set(also) & registers
+    if not model_records and not linked:
+        return False
     # Then what shapes those entries, transitively through register entries only.
     frontier = set(linked)
     while frontier:
@@ -1060,14 +1074,20 @@ def _changed_since(session: Session, scope: ProjectScope, model_id: uuid.UUID, s
         # Between register entries, one of them already linked (not another model's element).
         return l.from_id in registers and l.to_id in registers and (l.from_id in linked or l.to_id in linked)
 
-    if any((l.created_seq > seq or (l.removed_seq or 0) > seq) and relevant(l) for l in links):
+    def counts(link_seq: int | None) -> bool:
+        return link_seq is not None and link_seq > seq and link_seq not in ignore
+
+    if any((counts(l.created_seq) or counts(l.removed_seq)) and relevant(l) for l in links):
         return True
     if not linked:
         return False
     for rtype in _REGISTER_TYPES:
         rev = REVISION_TABLES[rtype]
-        if session.scalar(select(func.count()).select_from(rev).where(
-                rev.project_id == scope.project_id, rev.seq > seq, rev.record_id.in_(linked))):
+        query = select(func.count()).select_from(rev).where(
+            rev.project_id == scope.project_id, rev.seq > seq, rev.record_id.in_(linked))
+        if ignore:
+            query = query.where(rev.seq.not_in(ignore))
+        if session.scalar(query):
             return True
     return False
 

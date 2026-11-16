@@ -49,6 +49,9 @@ class CandidateOut(CandidateSummary):
     # What applying would change in the live model; null once applied or discarded.
     diff: CandidateDiff | None
     stale: bool
+    # Register entries the design depends on changed after it was proposed: it can still be
+    # applied, but its review no longer covers them, so it can't make the model Ready for Review.
+    review_outdated: bool
 
 
 def _summary(c: DesignCandidate) -> dict[str, Any]:
@@ -70,7 +73,8 @@ def _full(session, scope, c: DesignCandidate) -> CandidateOut:
     ready, blockers = design.candidate_readiness(session, scope, c)
     return CandidateOut(**_summary(c), content=c.content, internal_checks=c.internal_checks or [],
                         validation=c.validation or [], issue_attempts=c.issue_attempts or {},
-                        ready_for_review=ready, blockers=blockers, diff=diff, stale=stale)
+                        ready_for_review=ready, blockers=blockers, diff=diff, stale=stale,
+                        review_outdated=design.review_outdated(session, scope, c))
 
 
 @router.get("/models/{model_id}/candidates")

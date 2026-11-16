@@ -3,7 +3,10 @@
 The Architect builds a proposed model here instead of editing the live model element by
 element. The candidate pins the watermark it started from (`base_seq`). Applying it writes
 one attributed changeset; if the model changed after `base_seq`, the candidate is stale and
-is not applied (spec §7, stale detection).
+is not applied (spec §7, stale detection). It also pins the watermark it was proposed at
+(`proposed_seq`, after its review and escalations): a later change to a register entry it
+depends on leaves it applicable but makes its review out of date, so it can't make the model
+Ready for Review.
 """
 
 import enum
@@ -63,6 +66,9 @@ class DesignCandidate(Base):
     # the same model: seeded from the model's previous candidate.
     issue_attempts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, server_default="{}")
     summary: Mapped[str | None] = mapped_column(Text)
+    # The project watermark when the Architect finished it (review and escalations included).
+    # Register changes it depends on after this make its review out of date.
+    proposed_seq: Mapped[int | None] = mapped_column(Integer)
     applied_seq: Mapped[int | None] = mapped_column(Integer)
     applied_by: Mapped[uuid.UUID | None] = mapped_column()
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

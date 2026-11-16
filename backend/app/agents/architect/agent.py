@@ -479,6 +479,9 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
     # Escalate before applying: a register change after the readiness event would reset it to Draft.
     escalated = _escalate(session, scope, ctx, candidate)
     escalated["searches"] = _raise_decision_questions(session, scope, ctx, candidate)
+    # The watermark the review and escalations describe; register changes after it make the
+    # review out of date (design.review_outdated).
+    candidate.proposed_seq = modeling.current_seq(session, scope)
     session.commit()
     validation = _validation_note(candidate, skipped, corrections, escalated)
     ready, blockers = design.candidate_readiness(session, scope, candidate)

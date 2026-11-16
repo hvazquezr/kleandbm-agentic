@@ -149,6 +149,12 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
         <p className={cn("text-sm", candidate.stale || candidate.status === "stale" ? "text-amber-400" : "text-muted-foreground")}>
           {candidate.stale ? CANDIDATE_STATUS.stale : CANDIDATE_STATUS[candidate.status] ?? candidate.status}
         </p>
+        {candidate.review_outdated && !candidate.stale && (
+          <p className="text-sm text-amber-400">
+            {candidate.status === "applied" ? "" : "You can still apply this design, but it stays a Draft. "}
+            Ask the Architect to revise it against the current registers.
+          </p>
+        )}
         <Readiness candidate={candidate} reviewed={!!last} state={snapshot.state} />
       </section>
 

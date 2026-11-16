@@ -236,6 +236,10 @@
             "title": "Ready For Review",
             "type": "boolean"
           },
+          "review_outdated": {
+            "title": "Review Outdated",
+            "type": "boolean"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -298,7 +302,8 @@
           "ready_for_review",
           "blockers",
           "diff",
-          "stale"
+          "stale",
+          "review_outdated"
         ],
         "title": "CandidateOut",
         "type": "object"

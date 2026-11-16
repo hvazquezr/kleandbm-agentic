@@ -254,6 +254,56 @@ def test_proposed_candidates_carry_their_review_to_apply(proj):
     assert [c["data"]["issue_key"] for c in snap["checks"]] == ["grain:fact_sales"]
 
 
+def _proposed_reviewed_candidate(proj):
+    proj.alice.post(f"{proj.base}/changesets", json={"model_id": proj.model, "operations": [
+        {"op": "create", "type": "table", "ref": "s", "data": {"name": "dim_other", "kind": "dimension"}},
+        {"op": "create", "type": "attribute", "data": {"table_id": "$s", "name": "other_key", "logical_type": "integer",
+                                                        "role": "surrogate_key"}}]})
+    proj.script_agents(_fix_seq(proj, design_steps(proj)), [], pass_round())
+    cid = proj.run()[-1]["candidate"]["id"]
+    cand = proj.alice.get(f"{proj.base}/candidates/{cid}").json()
+    assert cand["ready_for_review"] is True and cand["review_outdated"] is False
+    return cid
+
+
+def _edit_requirement(proj, record_id, statement):
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    seq = next(r["seq"] for r in snap["requirements"] if r["id"] == record_id)
+    resp = proj.alice.post(f"{proj.base}/changesets", json={"operations": [
+        {"op": "update", "id": record_id, "expected_seq": seq, "data": {"statement": statement}}]})
+    assert resp.status_code == 201, resp.text
+
+
+def test_a_requirement_changed_after_review_makes_the_review_out_of_date(proj):
+    """The person can still apply the design, but the old review can't make it Ready for Review."""
+    cid = _proposed_reviewed_candidate(proj)
+    # The design maps the revenue requirement, which is not yet linked to anything in the model.
+    _edit_requirement(proj, proj.revenue_req, "Monthly gross and net revenue by store")
+    cand = proj.alice.get(f"{proj.base}/candidates/{cid}").json()
+    assert cand["review_outdated"] is True and cand["stale"] is False and cand["ready_for_review"] is False
+    assert any(b.startswith("review out of date") for b in cand["blockers"])
+
+    applied = proj.alice.post(f"{proj.base}/candidates/{cid}/apply")
+    assert applied.status_code == 200 and applied.json()["status"] == "applied"
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert snap["state"]["effective_state"] == "draft"
+    assert "fact_sales" in {t["data"]["name"] for t in snap["tables"]}
+
+
+def test_unrelated_register_changes_leave_the_review_current(proj):
+    cid = _proposed_reviewed_candidate(proj)
+    # Not mapped by the design and not linked to the model; another model's requirement.
+    other = proj.alice.post(f"{proj.base}/changesets", json={"operations": [
+        {"op": "create", "type": "requirement", "ref": "c", "data": {"statement": "Churn by cohort",
+                                                          "origin_kind": "user_statement"}}]}).json()["created"]
+    _edit_requirement(proj, other["c"], "Churn by signup cohort")
+    cand = proj.alice.get(f"{proj.base}/candidates/{cid}").json()
+    assert cand["review_outdated"] is False and cand["ready_for_review"] is True
+    proj.alice.post(f"{proj.base}/candidates/{cid}/apply")
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert snap["state"]["effective_state"] == "ready_for_review"
+
+
 def test_openai_adapter_translates_the_transcript(monkeypatch):
     """The Responses API mapping: replayed output items, function call outputs, stop reasons."""
     from types import SimpleNamespace as NS
