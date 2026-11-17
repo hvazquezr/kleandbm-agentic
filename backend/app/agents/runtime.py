@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.llm import ChatModel, ToolSpec, Usage
+from app.adapters.tracing import span, traced_complete
 from app.agents.transcripts import RunTranscript
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 
@@ -93,7 +94,8 @@ class Loop:
             self.emit({"type": "text", "text": "\n\n"})  # keep each step's text in its own paragraph
             self._streamed = False
         self._record(state["transcript"])
-        turn = self.chat_model.complete(self.system_prompt, state["transcript"], self.tools, on_text=self._on_text)
+        turn = traced_complete(self.chat_model, self.system_prompt, state["transcript"], self.tools,
+                               on_text=self._on_text, name=f"{self.run.agent} model")
         RunTranscript(self.session, self.run).add([turn.to_transcript()], stop_reason=turn.stop_reason, model=turn.model)
         self._recorded += 1
         self.session.commit()
@@ -120,7 +122,10 @@ class Loop:
             try:
                 if handler is None:
                     raise ToolInputError(f"unknown tool {name}")
-                out = handler(self.ctx, args)
+                with span(name, "tool", {"tool": name, "arguments": args}) as traced:
+                    out = handler(self.ctx, args)
+                    if traced is not None:
+                        traced.end(outputs={"tool": name, "ok": True, "result": out})
                 if savepoint is not None:
                     savepoint.commit()
                 if name in self.write_tools or own:

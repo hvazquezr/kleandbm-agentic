@@ -44,6 +44,7 @@ from app.agents.architect.tools import (
     ArchitectContext,
 )
 from app.agents.requirements.agent import _history
+from app.adapters import tracing
 from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome
 from app.agents.validator.agent import review as validator_review
 from app.domain import design, modeling, sources, tenancy
@@ -253,10 +254,11 @@ def run_design(
         app = graph.compile(checkpointer=checkpointer)
 
         try:
-            final = app.invoke(
-                {"transcript": transcript, "iterations": 0, "stop": None},
-                run_config(run, 6 * max_iterations + 20),
-            )
+            with tracing.agent_run(run):
+                final = app.invoke(
+                    {"transcript": transcript, "iterations": 0, "stop": None},
+                    run_config(run, 6 * max_iterations + 20),
+                )
         except Exception as exc:
             session.rollback()
             if isinstance(exc, LLMError):

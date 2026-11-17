@@ -93,6 +93,7 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
                            "total": (n["evaluation"] or {}).get("total"), "reason": n["reason"]} for n in dp["nodes"]],
             })
     run_id = (done.get("run") or {}).get("id")
+    record["ids"] = {**ids, "run_id": run_id}
     if run_id:
         record["usage"] = usage(user, base, run_id)
         if markers:

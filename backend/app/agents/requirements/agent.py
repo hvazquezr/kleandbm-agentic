@@ -20,6 +20,7 @@ from app.adapters.llm import ChatModel, LLMError
 from app.adapters.storage import ObjectStore
 from app.agents.requirements.prompt import SYSTEM_PROMPT
 from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext
+from app.adapters import tracing
 from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome
 from app.domain import documents, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
@@ -149,10 +150,11 @@ def run_turn(
         app = graph.compile(checkpointer=checkpointer)
 
         try:
-            final = app.invoke(
-                {"transcript": transcript, "iterations": 0, "stop": None},
-                run_config(run, 4 * max_iterations + 10),
-            )
+            with tracing.agent_run(run):
+                final = app.invoke(
+                    {"transcript": transcript, "iterations": 0, "stop": None},
+                    run_config(run, 4 * max_iterations + 10),
+                )
         except Exception as exc:
             session.rollback()
             record_usage(run, loop.usage, ctx.changeset_seqs)

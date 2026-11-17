@@ -16,6 +16,7 @@ from typing import Any
 from langgraph.graph import START, StateGraph
 from sqlalchemy.orm import Session
 
+from app.adapters import tracing
 from app.adapters.embeddings import Embedder
 from app.adapters.llm import ChatModel, LLMError
 from app.adapters.sources import SourceConnector
@@ -99,8 +100,9 @@ def review(
     status, detail = "completed", None
     try:
         brief = _brief(session, scope, candidate, source_ids, round_no, previous, correction)
-        final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
-                           {"recursion_limit": 4 * max_iterations + 10})
+        with tracing.child_run(child, "validator round"):
+            final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
+                               {"recursion_limit": 4 * max_iterations + 10})
         if ctx.summary is None:
             status, detail = "incomplete", final.get("stop") or "the Validator ended without submitting its review"
     except Exception as exc:

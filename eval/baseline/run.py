@@ -15,6 +15,11 @@ does. Variants alternate (baseline, tot, baseline, ...) so drift over time affec
 Writes eval/baseline/results/<timestamp>-<scenario>/: one JSON per run (records, usage, decision points,
 rubric), summary.json and report.md. --prices takes {llm_model: {input, output, cache_read,
 cache_write}} in dollars per million tokens; without it, cost is left blank rather than guessed.
+
+--langsmith traces every run to LangSmith (KLEANDBM_LANGSMITH_API_KEY needed) in the project
+kleandbm-eval, with full content (the eval data is synthetic), tagged with the experiment
+(results folder), variant, scenario, repeat and git commit, and posts each rubric check as
+feedback on the run's trace, so runs compare across commits in LangSmith.
 """
 
 import argparse
@@ -70,6 +75,34 @@ def _regrade(folder: Path, prices) -> int:
     return 0
 
 
+def _git_commit() -> str:
+    import subprocess
+
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
+                               capture_output=True, text=True).stdout.strip()
+        return f"{sha}-dirty" if dirty else sha or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def _post_feedback(settings, record) -> dict:
+    """Each rubric check as feedback (score 1 or 0) on the run's trace, whose id is the run id."""
+    from app.adapters import tracing
+
+    run_id = (record.get("ids") or {}).get("run_id")
+    if not run_id:
+        return {"posted": 0, "note": "no run id"}
+    client = tracing._client(settings.langsmith_api_key, settings.langsmith_endpoint, settings.langsmith_content)
+    client.flush()  # the trace has to exist before feedback attaches to it
+    checks = record["grade"]
+    for name, g in checks.items():
+        client.create_feedback(run_id, key=name, score=1 if g["passed"] else 0, comment=g["detail"][:2000])
+    client.create_feedback(run_id, key="rubric_score", score=sum(g["passed"] for g in checks.values()) / len(checks))
+    return {"trace_id": run_id, "posted": len(checks) + 1}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--variants", default="baseline,tot", help="comma-separated: baseline, tot")
@@ -77,6 +110,8 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1, help="runs per variant (LLM runs vary; 3+ to compare)")
     parser.add_argument("--prices", type=Path, help="JSON prices per model, dollars per million tokens")
     parser.add_argument("--out", type=Path, default=HERE / "results")
+    parser.add_argument("--langsmith", action="store_true",
+                        help="trace runs to LangSmith with full content and post rubric verdicts as feedback")
     parser.add_argument("--check", action="store_true",
                         help="set the scenario up once (database, source, documents) and stop before any agent runs")
     parser.add_argument("--regrade", type=Path, metavar="RESULTS_DIR",
@@ -125,6 +160,9 @@ def main() -> int:
         print("Warning: no KLEANDBM_OPENAI_API_KEY, so the Validator is skipped and every design stays unverified.",
               file=sys.stderr)
     prices = json.loads(args.prices.read_text()) if args.prices else None
+    if args.langsmith and not settings.langsmith_api_key:
+        print("Missing: KLEANDBM_LANGSMITH_API_KEY (needed for --langsmith)", file=sys.stderr)
+        return 2
 
     url = os.environ.get("KLEANDBM_EVAL_DATABASE_URL") or settings.database_url.rsplit("/", 1)[0] + "/kleandbm_eval"
     cfg = Config(str(BACKEND / "alembic.ini"))
@@ -183,9 +221,19 @@ def main() -> int:
             return 0
         records = []
         plan = [v for _ in range(args.repeats) for v in variants]
+        commit = _git_commit()
+        if args.langsmith:  # synthetic data only, so full content is fine here
+            settings.langsmith_tracing, settings.langsmith_content = True, "full"
+            settings.langsmith_project = "kleandbm-eval"
         for i, variant in enumerate(plan, 1):
             print(f"[{i}/{len(plan)}] {variant} …", flush=True)
+            if args.langsmith:
+                settings.langsmith_metadata = {"experiment": out.name, "variant": variant, "scenario": chosen.name,
+                                               "repeat": str((i - 1) // len(variants) + 1), "git_commit": commit}
+                settings.langsmith_tags = ["eval", f"experiment:{out.name}", f"variant:{variant}"]
             record = runner.run_once(User(), chosen, variant, password, settings, fresh_user=User)
+            if args.langsmith:
+                record["langsmith"] = _post_feedback(settings, record)
             records.append(record)
             (out / f"run-{i:02d}-{variant}.json").write_text(json.dumps(record, indent=1, default=str))
             passed = sum(g["passed"] for g in record["grade"].values())

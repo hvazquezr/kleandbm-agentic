@@ -100,6 +100,25 @@ class Settings(BaseSettings):
     # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
     agent_checkpoints: bool = True
 
+    # LangSmith tracing (app/adapters/tracing.py): an observability view, off by default.
+    # "metadata" sends structure, timing, ids, models, token usage and tool names only; "full"
+    # adds prompts and tool data (credentials redacted, personal data masked), for synthetic
+    # eval data only. Global LANGSMITH_* variables are ignored.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "kleandbm"
+    langsmith_content: str = "metadata"  # metadata | full
+    langsmith_tags: list[str] = []
+    langsmith_metadata: dict[str, str] = {}  # added to every trace (the eval runner sets experiment ids)
+
+    @field_validator("langsmith_content")
+    @classmethod
+    def _content_mode(cls, value: str) -> str:
+        if value not in ("metadata", "full"):
+            raise ValueError("langsmith_content must be 'metadata' or 'full'")
+        return value
+
     @field_validator("auth_issuer")
     @classmethod
     def _issuer_trailing_slash(cls, value: str) -> str:

@@ -22,6 +22,7 @@ from typing import Any
 from langgraph.graph import START, StateGraph
 from sqlalchemy.orm import Session
 
+from app.adapters import tracing
 from app.adapters.embeddings import Embedder
 from app.adapters.llm import ChatModel, LLMError, ToolSpec
 from app.adapters.storage import ObjectStore
@@ -198,8 +199,9 @@ def consult(
 
     status, detail = RunStatus.COMPLETED, None
     try:
-        final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
-                           {"recursion_limit": 4 * max_iterations + 10})
+        with tracing.child_run(child, "consultation"):
+            final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
+                               {"recursion_limit": 4 * max_iterations + 10})
     except Exception as exc:
         session.rollback()
         record_usage(child, loop.usage, ctx.changeset_seqs)

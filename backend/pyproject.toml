@@ -26,6 +26,7 @@ dependencies = [
     # Agents and model providers
     "langgraph>=1.2,<1.3",
     "langgraph-checkpoint-postgres>=3.2,<3.3",
+    "langsmith>=0.14.17,<0.15",
     "anthropic>=2.8,<3",
     "openai>=3.48,<4",
     # Sources (MCP server and client)

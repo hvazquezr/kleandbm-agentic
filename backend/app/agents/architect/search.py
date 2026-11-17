@@ -36,6 +36,7 @@ from app.adapters.llm import ChatModel, LLMError, ToolSpec, Usage
 from app.agents.architect import tools as at
 from app.agents.requirements.tools import _none_if_empty, _obj, _opt
 from app.agents.runtime import ToolInputError
+from app.adapters.tracing import traced_complete
 from app.agents.transcripts import RunTranscript
 from app.domain import design, modeling
 from app.domain.modeling import CreateOp, LinkOp
@@ -383,7 +384,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
             recorder.system(system, segment)
         recorder.add(transcript[done:], segment)
         session.commit()
-        turn = chat_model.complete(system, transcript, tools)
+        turn = traced_complete(chat_model, system, transcript, tools, name=f"search {segment}")
         recorder.add([turn.to_transcript()], segment, stop_reason=turn.stop_reason, model=turn.model)
         session.commit()
         recorded[id(transcript)] = (transcript, len(transcript) + 1)  # the caller appends the turn
