@@ -171,3 +171,44 @@ class RunMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class RunAssessment(Base):
+    """The transcript monitor's reading of one top-level run (its child runs included): a
+    suspicion score for the agents' behaviour, the concerns behind it, and the instructions it
+    found in untrusted content (documents, source values, comments). Triage for people, never a
+    gate. One row per assessment; a run can be reassessed."""
+
+    __tablename__ = "run_assessments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "run_id"],
+            ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
+            ondelete="CASCADE", name="fk_run_assessments_run",
+        ),
+        Index("ix_run_assessments_run", "tenant_id", "project_id", "run_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    # pending | completed | failed | skipped (no monitor model configured)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    monitor_model: Mapped[str | None] = mapped_column(String(100))
+    score: Mapped[int | None] = mapped_column(Integer)  # 0-100, the mean over samples
+    flagged: Mapped[bool] = mapped_column(nullable=False, default=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    # [{kind, explanation, ordinals: [{agent, ordinal}]}]
+    concerns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    # [{agent, ordinal, quote, followed}]
+    untrusted_instructions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    samples: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)  # each sample's score
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated: Mapped[bool] = mapped_column(nullable=False, default=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

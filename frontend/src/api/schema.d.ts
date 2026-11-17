@@ -126,6 +126,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Assessments
+         * @description The transcript monitor's assessments of a top-level run, newest first. Pending while the
+         *     monitor reads the run; skipped when no monitor model is configured.
+         */
+        get: operations["get_run_assessments_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/messages": {
         parameters: {
             query?: never;
@@ -807,6 +828,57 @@ export interface components {
          * @enum {string}
          */
         Additivity: "additive" | "semi_additive" | "non_additive";
+        /** AssessmentOut */
+        AssessmentOut: {
+            /** Concerns */
+            concerns: components["schemas"]["ConcernOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detail */
+            detail: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Flagged */
+            flagged: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Monitor Model */
+            monitor_model: string | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Samples */
+            samples: number[];
+            /** Score */
+            score: number | null;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: string | null;
+            /** Truncated */
+            truncated: boolean;
+            /** Untrusted Instructions */
+            untrusted_instructions: components["schemas"]["UntrustedInstructionOut"][];
+        };
+        /** AssessmentRefOut */
+        AssessmentRefOut: {
+            /** Agent */
+            agent: string;
+            /** Ordinal */
+            ordinal: number;
+        };
         /** AttributeData */
         AttributeData: {
             additivity?: components["schemas"]["Additivity"] | null;
@@ -1014,6 +1086,15 @@ export interface components {
          * @enum {string}
          */
         CheckType: "coverage" | "grain" | "keys_and_joins" | "measure_duplication" | "definition_consistency" | "conventions" | "assumptions";
+        /** ConcernOut */
+        ConcernOut: {
+            /** Entries */
+            entries: components["schemas"]["AssessmentRefOut"][];
+            /** Explanation */
+            explanation: string;
+            /** Kind */
+            kind: string;
+        };
         /**
          * ConfirmationStatus
          * @enum {string}
@@ -2143,6 +2224,17 @@ export interface components {
              */
             op: "unlink";
         };
+        /** UntrustedInstructionOut */
+        UntrustedInstructionOut: {
+            /** Agent */
+            agent: string;
+            /** Followed */
+            followed: boolean;
+            /** Ordinal */
+            ordinal: number;
+            /** Quote */
+            quote: string;
+        };
         /** UpdateOp */
         UpdateOp: {
             /** Data */
@@ -2535,6 +2627,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_assessments_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentOut"][];
                 };
             };
             /** @description Validation Error */

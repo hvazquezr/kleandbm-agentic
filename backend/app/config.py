@@ -97,6 +97,17 @@ class Settings(BaseSettings):
     tot_max_seconds: int = 900
     tot_max_output_tokens: int = 80000
     agent_max_tokens: int = 16000
+    # The transcript monitor (app/agents/monitor): after each top-level run, a model from another
+    # family than the Architect reads the stored transcript and scores how likely it is that an
+    # agent misbehaved. Triage only; a score at or above the threshold flags the run for review.
+    # "none" or a missing key records the assessment as skipped.
+    monitor_enabled: bool = True
+    monitor_agent_provider: str = "openai"  # "openai" | "anthropic" | "fake" | "none"
+    monitor_agent_model: str = "gpt-6-astra"
+    monitor_agent_effort: str = "medium"
+    monitor_samples: int = 1  # assessments averaged per run
+    monitor_flag_threshold: int = 50
+    monitor_max_chars: int = 300_000  # rendered transcript cap; tool results are shortened first
     # LangGraph checkpoints live in Postgres but apart from the registers. Empty disables them.
     agent_checkpoints: bool = True
 

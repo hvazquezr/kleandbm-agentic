@@ -96,9 +96,27 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
     record["ids"] = {**ids, "run_id": run_id}
     if run_id:
         record["usage"] = usage(user, base, run_id)
+        record["monitor"] = monitor(user, base, run_id)
         if markers:
             record["exposure"] = exposure(user.get(f"{base}/agent-runs/{run_id}/messages").json(), markers)
     return record
+
+
+def monitor(user, base: str, run_id: str, timeout_s: float = 600.0) -> dict[str, Any] | None:
+    """The transcript monitor's assessment of the run. It runs after the stream ends, so wait
+    for it; None if there's none (monitor disabled) or it didn't finish in time."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        rows = user.get(f"{base}/agent-runs/{run_id}/assessments").json()
+        if rows and rows[0]["status"] != "pending":
+            a = rows[0]
+            return {k: a[k] for k in ("status", "monitor_model", "score", "flagged", "summary", "concerns",
+                                      "untrusted_instructions", "samples", "input_tokens", "output_tokens",
+                                      "truncated", "detail")}
+        if not rows and time.monotonic() > deadline - timeout_s + 30:
+            return None  # nothing started within 30 s: the monitor is off
+        time.sleep(2)
+    return {"status": "timeout"}
 
 
 def exposure(messages: list[dict[str, Any]], markers: dict[str, str]) -> dict[str, dict[str, Any]]:
@@ -199,6 +217,10 @@ def summarize(records: list[dict[str, Any]], prices: dict[str, dict[str, float]]
             "input_tokens": _mean([r["usage"]["total"]["input_tokens"] for r in rs if r.get("usage")]),
             "search_output_tokens": _mean([sum(d["usage"].get("output_tokens", 0) for d in r["decision_points"]) for r in rs]),
             "cost_usd": _mean(costs) if len(costs) == len(rs) else None,
+            "monitor_score": _mean([r["monitor"]["score"] for r in rs if (r.get("monitor") or {}).get("score") is not None]),
+            "monitor_flagged": sum(1 for r in rs if (r.get("monitor") or {}).get("flagged")),
+            "monitor_untrusted_found": _mean([len(r["monitor"]["untrusted_instructions"]) for r in rs
+                                              if (r.get("monitor") or {}).get("status") == "completed"]),
         }
     return out
 
@@ -236,6 +258,9 @@ def report(summary: dict[str, Any], records: list[dict[str, Any]]) -> str:
     row("output tokens", lambda s: s["output_tokens"])
     row("&nbsp;&nbsp;of which in searches", lambda s: s["search_output_tokens"])
     row("cost (USD)", lambda s: s["cost_usd"] if s["cost_usd"] is not None else "– (pass --prices)")
+    row("monitor score (0-100)", lambda s: s.get("monitor_score") if s.get("monitor_score") is not None else "–")
+    row("monitor flagged", lambda s: f"{s.get('monitor_flagged', 0)}/{s['runs']}")
+    row("untrusted instructions the monitor found", lambda s: s.get("monitor_untrusted_found") or "–")
     lines += ["", "## Runs", ""]
     for i, r in enumerate(records, 1):
         failed = [c for c, g in r["grade"].items() if not g["passed"]]

@@ -25,8 +25,11 @@ from app.domain.tenancy import InvalidOperation
 def _chat_model_from_settings(settings, agent: str = "business_requirements") -> ChatModel:
     """The chat model for one agent, from that agent's provider, model and effort settings."""
     prefix = {"business_requirements": "requirements_agent", "architect": "architect_agent",
-              "validator": "validator_agent"}[agent]
+              "validator": "validator_agent", "monitor": "monitor_agent"}[agent]
     provider = getattr(settings, f"{prefix}_provider")
+    if agent == "monitor" and provider not in ("fake", "none") and provider == settings.architect_agent_provider:
+        # A monitor from the Architect's own family shares its blind spots.
+        raise LLMError("the monitor must use another model family than the Architect")
     if provider == "openai":
         return OpenAIChatModel(
             settings.openai_api_key, getattr(settings, f"{prefix}_model"),

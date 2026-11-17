@@ -10,6 +10,160 @@
         "title": "Additivity",
         "type": "string"
       },
+      "AssessmentOut": {
+        "properties": {
+          "concerns": {
+            "items": {
+              "$ref": "#/components/schemas/ConcernOut"
+            },
+            "title": "Concerns",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "flagged": {
+            "title": "Flagged",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "monitor_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitor Model"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "untrusted_instructions": {
+            "items": {
+              "$ref": "#/components/schemas/UntrustedInstructionOut"
+            },
+            "title": "Untrusted Instructions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "status",
+          "monitor_model",
+          "score",
+          "flagged",
+          "summary",
+          "concerns",
+          "untrusted_instructions",
+          "samples",
+          "input_tokens",
+          "output_tokens",
+          "truncated",
+          "detail",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AssessmentOut",
+        "type": "object"
+      },
+      "AssessmentRefOut": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent",
+          "ordinal"
+        ],
+        "title": "AssessmentRefOut",
+        "type": "object"
+      },
       "AttributeData": {
         "additionalProperties": false,
         "properties": {
@@ -622,6 +776,32 @@
         ],
         "title": "CheckType",
         "type": "string"
+      },
+      "ConcernOut": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentRefOut"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "explanation",
+          "entries"
+        ],
+        "title": "ConcernOut",
+        "type": "object"
       },
       "ConfirmationStatus": {
         "enum": [
@@ -3784,6 +3964,34 @@
         "title": "UnlinkOp",
         "type": "object"
       },
+      "UntrustedInstructionOut": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "followed": {
+            "title": "Followed",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "ordinal",
+          "quote",
+          "followed"
+        ],
+        "title": "UntrustedInstructionOut",
+        "type": "object"
+      },
       "UpdateOp": {
         "properties": {
           "data": {
@@ -4537,6 +4745,79 @@
           }
         ],
         "summary": "Get Run",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments": {
+      "get": {
+        "description": "The transcript monitor's assessments of a top-level run, newest first. Pending while the\nmonitor reads the run; skipped when no monitor model is configured.",
+        "operationId": "get_run_assessments_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssessmentOut"
+                  },
+                  "title": "Response Get Run Assessments Tenants  Tenant Id  Projects  Project Id  Agent Runs  Run Id  Assessments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Run Assessments",
         "tags": [
           "conversations"
         ]

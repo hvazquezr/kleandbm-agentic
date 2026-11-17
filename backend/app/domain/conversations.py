@@ -11,7 +11,7 @@ from app.domain.access import NotFoundInScope, Permission, ProjectScope
 from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
 from app.persistence.conversations import (
-    AgentRun, Conversation, ConversationMessage, MessageRole, RunMessage, RunStatus,
+    AgentRun, Conversation, ConversationMessage, MessageRole, RunAssessment, RunMessage, RunStatus,
 )
 
 AGENTS = {"business_requirements": "Requirements", "architect": "Architect"}
@@ -158,3 +158,12 @@ def run_transcript(
     for m in messages:
         grouped.setdefault(m.run_id, []).append(m)
     return [(r, m) for r in runs for m in grouped.get(r.id, [])]
+
+
+def run_assessments(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> list[RunAssessment]:
+    """The transcript monitor's assessments of a run, newest first."""
+    get_run(session, scope, run_id)
+    return list(session.scalars(
+        select(RunAssessment).where(RunAssessment.tenant_id == scope.tenant_id, RunAssessment.project_id == scope.project_id,
+                                    RunAssessment.run_id == run_id)
+        .order_by(RunAssessment.created_at.desc())))

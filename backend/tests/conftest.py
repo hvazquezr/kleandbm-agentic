@@ -160,3 +160,12 @@ def as_user(client, make_token):
             return client.delete(url, headers=self.headers, **kw)
 
     return _User
+
+
+@pytest.fixture(autouse=True)
+def _no_monitor_by_default(monkeypatch):
+    """Many tests hand every agent the same scripted model; the transcript monitor would read
+    from it after the run. Monitor tests turn it back on (tests/test_monitor.py)."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "monitor_enabled", False)

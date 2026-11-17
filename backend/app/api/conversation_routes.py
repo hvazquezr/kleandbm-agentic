@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from app.adapters.llm import LLMError
 from app.agents.architect import search
 from app.agents.architect.agent import run_design
+from app.agents.monitor.monitor import monitor_run
 from app.agents.requirements.agent import run_turn
 from app.api.source_routes import get_box
 from app.api.deps import ProjectScopeDep, SessionDep
@@ -98,6 +99,43 @@ class RunOut(BaseModel):
     cache_write_tokens: int
     changeset_seqs: list[int]
     started_at: datetime
+    finished_at: datetime | None
+
+
+class AssessmentRefOut(BaseModel):
+    agent: str
+    ordinal: int
+
+
+class ConcernOut(BaseModel):
+    kind: str
+    explanation: str
+    entries: list[AssessmentRefOut]
+
+
+class UntrustedInstructionOut(BaseModel):
+    agent: str
+    ordinal: int
+    quote: str
+    followed: bool
+
+
+class AssessmentOut(BaseModel):
+    id: uuid.UUID
+    run_id: uuid.UUID
+    status: str
+    monitor_model: str | None
+    score: int | None
+    flagged: bool
+    summary: str | None
+    concerns: list[ConcernOut]
+    untrusted_instructions: list[UntrustedInstructionOut]
+    samples: list[int]
+    input_tokens: int
+    output_tokens: int
+    truncated: bool
+    detail: str | None
+    created_at: datetime
     finished_at: datetime | None
 
 
@@ -182,6 +220,13 @@ def send_message(
         except LLMError as exc:
             validator_unavailable = str(exc)
 
+    monitor_model = monitor_unavailable = None
+    if settings.monitor_enabled:
+        try:  # reads the finished run's transcript; another model family than the Architect
+            monitor_model = request.app.state.chat_model_factory("monitor")
+        except LLMError as exc:
+            monitor_unavailable = str(exc)
+
     def worker() -> None:
         try:
             if agent == "architect":
@@ -215,7 +260,10 @@ def send_message(
             events.put({"type": "done", "status": "failed", "detail": "the agent could not start",
                         "message_id": None, "run": {"id": str(run_id)}})
         finally:
-            events.put(None)
+            events.put(None)  # the stream ends here; the monitor runs after, so nobody waits for it
+        if settings.monitor_enabled:
+            monitor_run(app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
+                        chat_model=monitor_model, settings=settings, unavailable=monitor_unavailable)
 
     # The agent runs in its own thread with its own session, independent of this request's
     # session, so it finishes and records its outcome even if the browser disconnects.
@@ -241,3 +289,15 @@ def get_run_messages(
                       segment=m.segment, content=m.content, created_at=m.created_at)
         for r, m in conversations.run_transcript(session, scope, run_id, include_children)
     ]
+
+
+@router.get("/agent-runs/{run_id}/assessments")
+def get_run_assessments(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[AssessmentOut]:
+    """The transcript monitor's assessments of a top-level run, newest first. Pending while the
+    monitor reads the run; skipped when no monitor model is configured."""
+    return [AssessmentOut(
+        id=a.id, run_id=a.run_id, status=a.status, monitor_model=a.monitor_model, score=a.score, flagged=a.flagged,
+        summary=a.summary, concerns=a.concerns, untrusted_instructions=a.untrusted_instructions, samples=a.samples,
+        input_tokens=a.input_tokens, output_tokens=a.output_tokens, truncated=a.truncated, detail=a.detail,
+        created_at=a.created_at, finished_at=a.finished_at,
+    ) for a in conversations.run_assessments(session, scope, run_id)]
