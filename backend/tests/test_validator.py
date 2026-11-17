@@ -111,6 +111,57 @@ def test_a_failed_finding_is_corrected_and_revalidated(proj):
     assert "after 1 correction round" in reply
 
 
+def test_every_agent_run_keeps_its_transcript(proj):
+    """The Architect's run and its Validator rounds are all in run_messages: the prompt, the
+    briefs, tool calls and results, and the correction turn the graph injects."""
+    no_grain = {**FACT_SALES, "grain": ""}
+    architect_steps = [*_fix_seq(proj, design_steps(proj, fact=no_grain)),
+                       {"tool_calls": [{"name": "put_table", "input": FACT_SALES}]},
+                       {"text": "Declared the order-line grain on fact_sales."}]
+    architect, _, validator = proj.script_agents(architect_steps, [], [*fail_round(), *pass_round()])
+    done = proj.run()[-1]
+    url = f"{proj.base}/agent-runs/{done['run']['id']}/messages"
+
+    msgs = proj.alice.get(url).json()
+    runs = list(dict.fromkeys((m["run_id"], m["agent"]) for m in msgs))
+    assert [a for _, a in runs] == ["architect", "validator", "validator"]
+    by_run = {rid: [m for m in msgs if m["run_id"] == rid] for rid, _ in runs}
+    arch = by_run[runs[0][0]]
+    assert [m["ordinal"] for m in arch] == list(range(1, len(arch) + 1))
+    assert arch[0]["role"] == "system" and arch[0]["content"]["text"] and arch[0]["content"]["sha256"]
+    assert arch[1]["role"] == "user" and "<project_context>" in arch[1]["content"]["text"]
+    # What the model saw is what was stored, call by call.
+    assert len([m for m in arch if m["role"] == "assistant"]) == len(architect.calls)
+    assert any(m["role"] == "user" and "<validator_findings" in m["content"]["text"] for m in arch)
+    put = next(m for m in arch if m["role"] == "assistant" and any(c["name"] == "put_table" for c in m["content"]["tool_calls"]))
+    assert put["content"]["stop_reason"] and put["content"]["model"]
+    assert next(m for m in arch if m["ordinal"] == put["ordinal"] + 1)["role"] == "tool"
+    first_review = by_run[runs[1][0]]
+    assert first_review[0]["parent_run_id"] == done["run"]["id"]
+    assert [m["role"] for m in first_review][:2] == ["system", "user"]
+    assert first_review[1]["content"]["text"] == validator.calls[0]["transcript"][0]["text"]  # the brief
+    assert "round 1" in by_run[runs[2][0]][1]["content"]["text"]
+
+    only = proj.alice.get(url, params={"include_children": False}).json()
+    assert {m["agent"] for m in only} == {"architect"} and len(only) == len(arch)
+
+
+def test_transcripts_redact_credentials_and_keep_readable_thinking():
+    from app.agents.transcripts import _redact, content_of
+
+    role, content = content_of({"role": "assistant", "text": "connect with password=hunter2", "tool_calls": [],
+                                "raw": [{"type": "thinking", "thinking": "Use the grain.", "signature": "abc"},
+                                        {"type": "redacted_thinking", "data": "zzz"},
+                                        {"type": "reasoning", "summary": [{"type": "summary_text", "text": "Check keys."}],
+                                         "encrypted_content": "qqq"}]})
+    content = _redact(content)
+    assert role == "assistant" and "hunter2" not in content["text"]
+    assert content["thinking"] == ["Use the grain.", "[thinking redacted by the provider]", "Check keys."]
+    assert "abc" not in json.dumps(content) and "qqq" not in json.dumps(content)
+    _, tool = content_of({"role": "tool", "results": [{"id": "1", "content": "{}", "is_error": False, "image": "b64"}]})
+    assert "b64" not in json.dumps(tool) and tool["results"][0]["image"]
+
+
 def test_corrections_stop_at_the_limits_and_escalate(proj):
     # The Validator keeps failing the same issue; the Architect can't fix it.
     no_grain = {**FACT_SALES, "grain": ""}

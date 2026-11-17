@@ -36,6 +36,7 @@ from app.adapters.llm import ChatModel, LLMError, ToolSpec, Usage
 from app.agents.architect import tools as at
 from app.agents.requirements.tools import _none_if_empty, _obj, _opt
 from app.agents.runtime import ToolInputError
+from app.agents.transcripts import RunTranscript
 from app.domain import design, modeling
 from app.domain.modeling import CreateOp, LinkOp
 from app.domain.records import DecisionKind, LinkType, RecordType
@@ -368,9 +369,24 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
     emit({"type": "search", "status": "started", "decision_point_id": str(dp.id), "question": question,
           "stages": stages})
 
+    # Search calls are recorded under the Architect run, one segment per role. Each generator
+    # call is a fresh conversation; an evaluator conversation grows across its calls, so only
+    # its new entries are written (keyed by the list, which is kept alive here).
+    recorder = RunTranscript(session, ctx.run)
+    recorded: dict[int, tuple[list, int]] = {}
+
     def call(system: str, transcript: list, tools: list[ToolSpec]):
         budget.model_calls += 1
+        segment = f"search:{dp.id}:{'generator' if system == GENERATOR_PROMPT else 'evaluator'}"
+        _, done = recorded.get(id(transcript), (transcript, 0))
+        if done == 0:
+            recorder.system(system, segment)
+        recorder.add(transcript[done:], segment)
+        session.commit()
         turn = chat_model.complete(system, transcript, tools)
+        recorder.add([turn.to_transcript()], segment, stop_reason=turn.stop_reason, model=turn.model)
+        session.commit()
+        recorded[id(transcript)] = (transcript, len(transcript) + 1)  # the caller appends the turn
         budget.usage.add(turn.usage)
         ctx.extra_usage.add(turn.usage)
         return turn

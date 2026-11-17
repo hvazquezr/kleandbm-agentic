@@ -44,7 +44,7 @@ from app.agents.architect.tools import (
     ArchitectContext,
 )
 from app.agents.requirements.agent import _history
-from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, stop_outcome
+from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome
 from app.agents.validator.agent import review as validator_review
 from app.domain import design, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
@@ -155,7 +155,7 @@ def run_design(
         loop = Loop(session=session, run=run, chat_model=chat_model, system_prompt=SYSTEM_PROMPT,
                     tools=TOOL_SPECS if tot is not None else BASELINE_TOOL_SPECS, handlers=HANDLERS,
                     write_tools=WRITE_TOOLS, ctx=ctx, emit=emit,
-                    max_iterations=max_iterations, own_transaction=OWN_TRANSACTION_TOOLS)
+                    max_iterations=max_iterations, own_transaction=OWN_TRANSACTION_TOOLS, history=len(transcript) - 1)
         outcome: dict[str, Any] = {}
         episode: dict[str, Any] = {"corrections": 0, "skipped": None}
 
@@ -255,7 +255,7 @@ def run_design(
         try:
             final = app.invoke(
                 {"transcript": transcript, "iterations": 0, "stop": None},
-                {"configurable": {"thread_id": str(run.id)}, "recursion_limit": 6 * max_iterations + 20},
+                run_config(run, 6 * max_iterations + 20),
             )
         except Exception as exc:
             session.rollback()

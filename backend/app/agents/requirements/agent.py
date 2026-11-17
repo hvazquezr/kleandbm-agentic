@@ -20,7 +20,7 @@ from app.adapters.llm import ChatModel, LLMError
 from app.adapters.storage import ObjectStore
 from app.agents.requirements.prompt import SYSTEM_PROMPT
 from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext
-from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, stop_outcome
+from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome
 from app.domain import documents, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
@@ -142,7 +142,7 @@ def run_turn(
                           reason=f"Business Requirements agent run {run.id}")
         loop = Loop(session=session, run=run, chat_model=chat_model, system_prompt=SYSTEM_PROMPT,
                     tools=TOOL_SPECS, handlers=HANDLERS, write_tools=WRITE_TOOLS, ctx=ctx, emit=emit,
-                    max_iterations=max_iterations)
+                    max_iterations=max_iterations, history=len(transcript) - 1)
         graph = StateGraph(State)
         loop.add_to(graph)
         graph.add_edge(START, "model")
@@ -151,7 +151,7 @@ def run_turn(
         try:
             final = app.invoke(
                 {"transcript": transcript, "iterations": 0, "stop": None},
-                {"configurable": {"thread_id": str(run.id)}, "recursion_limit": 4 * max_iterations + 10},
+                run_config(run, 4 * max_iterations + 10),
             )
         except Exception as exc:
             session.rollback()

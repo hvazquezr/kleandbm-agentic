@@ -7,6 +7,9 @@
   while the agent works, and a failed tool rolls back cleanly. Tool errors go back to the
   model as is_error results instead of failing the run.
 - Events (text deltas, tool activity) go to `emit` for streaming to the browser.
+- Everything the model sees and says is written to `run_messages` as it happens and committed,
+  so the transcript survives a failed run (`app/agents/transcripts.py`). Entries a node outside
+  the loop appends (the Architect's correction turns) are picked up before the next model call.
 """
 
 import json
@@ -21,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.llm import ChatModel, ToolSpec, Usage
+from app.agents.transcripts import RunTranscript
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 
 Emit = Callable[[dict[str, Any]], None]
@@ -55,9 +59,28 @@ class Loop:
     # Tools that manage their own transaction (they run a subgraph that commits as it goes), so
     # they run outside the per-call savepoint; the session is clean before each tool call.
     own_transaction: set[str] = field(default_factory=set)
+    # How many leading transcript entries are earlier chat turns replayed to the model; they're
+    # recorded once, as the "history" segment.
+    history: int = 0
     usage: Usage = field(default_factory=Usage)
     activity: list[dict[str, Any]] = field(default_factory=list)
     _streamed: bool = False
+    _recorded: int = -1  # transcript entries written so far; -1 before the system prompt
+
+    def _record(self, transcript: list[dict[str, Any]]) -> None:
+        """Write the entries not recorded yet, and commit so they outlive a failed run."""
+        recorder = RunTranscript(self.session, self.run)
+        if self._recorded < 0:
+            recorder.system(self.system_prompt)
+            if self.history:
+                recorder.add(transcript[: self.history], segment="history")
+            self._recorded = self.history
+        if len(transcript) < self._recorded:  # replaced rather than extended: record it all
+            self._recorded = 0
+        if len(transcript) > self._recorded:
+            recorder.add(transcript[self._recorded:])
+            self._recorded = len(transcript)
+        self.session.commit()
 
     def _on_text(self, chunk: str) -> None:
         self.emit({"type": "text", "text": chunk})
@@ -69,7 +92,11 @@ class Loop:
         if self._streamed:
             self.emit({"type": "text", "text": "\n\n"})  # keep each step's text in its own paragraph
             self._streamed = False
+        self._record(state["transcript"])
         turn = self.chat_model.complete(self.system_prompt, state["transcript"], self.tools, on_text=self._on_text)
+        RunTranscript(self.session, self.run).add([turn.to_transcript()], stop_reason=turn.stop_reason, model=turn.model)
+        self._recorded += 1
+        self.session.commit()
         self.usage.add(turn.usage)
         self.run.iterations = state["iterations"] + 1
         stop = None
@@ -125,6 +152,7 @@ class Loop:
             self.emit({"type": "tool", "status": "ok" if item["ok"] else "error", "name": name,
                        "summary": item["summary"], "record": item.get("record")})
         update: dict[str, Any] = {"transcript": [*state["transcript"], {"role": "tool", "results": results}]}
+        self._record(update["transcript"])
         if finished:
             update["stop"] = "finished"
         return update
@@ -141,6 +169,17 @@ class Loop:
         graph.add_conditional_edges("model", route, ["tools", after_loop])
         # A finish tool ends the loop without another model call.
         graph.add_conditional_edges("tools", lambda s: after_loop if s["stop"] else "model", ["model", after_loop])
+
+
+def run_config(run: AgentRun, recursion_limit: int) -> dict[str, Any]:
+    """LangGraph config for a top-level run. The checkpoint thread is the run id, which the
+    server creates inside the caller's scope; nothing reads a checkpoint by a client-supplied
+    id. LangGraph's tables have no scope columns, so the scope and actor go in each
+    checkpoint's metadata, for audits and for deleting a project's checkpoints."""
+    return {"configurable": {"thread_id": str(run.id)}, "recursion_limit": recursion_limit,
+            "metadata": {"tenant_id": str(run.tenant_id), "project_id": str(run.project_id),
+                         "conversation_id": str(run.conversation_id), "agent": run.agent,
+                         "initiated_by": str(run.initiated_by)}}
 
 
 def last_text(transcript: list[dict[str, Any]]) -> str:

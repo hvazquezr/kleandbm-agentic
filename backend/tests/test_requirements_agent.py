@@ -142,6 +142,24 @@ def test_second_message_includes_history(proj):
     assert "Also by store." in model.calls[0]["transcript"][-1]["text"]
 
 
+def test_history_is_stored_once_per_run_and_checkpoints_carry_the_scope(proj):
+    proj.script({"text": "Noted: you care about monthly revenue."})
+    proj.send(proj.alice, "We report revenue monthly.")
+    proj.script({"text": "Understood."})
+    events = sse(proj.send(proj.alice, "Also by store."))
+    run = next(e for e in events if e["type"] == "done")["run"]["id"]
+    msgs = proj.alice.get(f"{proj.base}/agent-runs/{run}/messages").json()
+    assert [(m["role"], m["segment"]) for m in msgs] == [
+        ("system", None), ("user", "history"), ("assistant", "history"), ("user", None), ("assistant", None)]
+    assert "Also by store." in msgs[3]["content"]["text"] and msgs[4]["content"]["text"] == "Understood."
+
+    # The checkpoint thread is the run; its metadata names the scope and the person.
+    saver = proj.client.app.state.agent_checkpointer
+    meta = saver.get_tuple({"configurable": {"thread_id": run}}).metadata
+    assert meta["tenant_id"] == proj.tenant and meta["project_id"] == proj.project
+    assert meta["agent"] == "business_requirements" and meta["initiated_by"]
+
+
 def test_tool_errors_go_back_to_the_model(proj):
     model = proj.script(
         {"tool_calls": [{"name": "update_entry", "input": {

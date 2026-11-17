@@ -63,6 +63,7 @@ ROUTES: list[tuple[str, str, dict | None]] = [
     ("GET", "/conversations/{conversation}/messages", None),
     ("POST", "/conversations/{conversation}/messages", {"text": "probe", "attachment_version_ids": []}),
     ("GET", "/agent-runs/{run}", None),
+    ("GET", "/agent-runs/{run}/messages", None),
     ("GET", "/candidates/{candidate}", None),
     ("GET", "/candidates/{candidate}/decision-points", None),
     ("POST", "/candidates/{candidate}/apply", None),

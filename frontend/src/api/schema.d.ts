@@ -126,6 +126,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Messages
+         * @description The run's transcript (system prompt, briefs, assistant text, thinking and tool calls,
+         *     tool results), followed by those of the runs it started unless include_children is false.
+         */
+        get: operations["get_run_messages_tenants__tenant_id__projects__project_id__agent_runs__run_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/candidates/{candidate_id}": {
         parameters: {
             query?: never;
@@ -1834,6 +1855,33 @@ export interface components {
              */
             outcome: "accepted" | "rejected";
         };
+        /** RunMessageOut */
+        RunMessageOut: {
+            /** Agent */
+            agent: string;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Parent Run Id */
+            parent_run_id: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Segment */
+            segment: string | null;
+        };
         /** RunOut */
         RunOut: {
             /** Agent */
@@ -2487,6 +2535,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_messages_tenants__tenant_id__projects__project_id__agent_runs__run_id__messages_get: {
+        parameters: {
+            query?: {
+                include_children?: boolean;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunMessageOut"][];
                 };
             };
             /** @description Validation Error */

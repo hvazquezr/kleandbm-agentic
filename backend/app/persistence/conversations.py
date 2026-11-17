@@ -134,3 +134,40 @@ class ConversationMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class RunMessage(Base):
+    """One entry of what an agent run's model saw and said, in order: the system prompt, the
+    brief or user turn, assistant text, thinking and tool calls, and tool results. Append-only
+    and written as the run goes, for every agent (chat, Architect, consultation, Validator and
+    the Architect's design-search calls). Checkpoints stay runtime state for resuming a run;
+    this is the readable record. Credentials are redacted before writing."""
+
+    __tablename__ = "run_messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "run_id"],
+            ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
+            ondelete="CASCADE", name="fk_run_messages_run",
+        ),
+        UniqueConstraint("tenant_id", "project_id", "run_id", "ordinal", name="uq_run_messages_ordinal"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    # system | user | assistant | tool
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Which conversation inside the run: null for the run's own loop, "history" for earlier
+    # chat turns replayed to the model, "search:<decision point id>:<generator|evaluator>" for
+    # design-search calls.
+    segment: Mapped[str | None] = mapped_column(String(200))
+    # system: {text, sha256} (text only the first time a prompt appears in the run);
+    # user: {text}; assistant: {text, thinking, tool_calls, stop_reason, model};
+    # tool: {results: [{id, content, is_error, image?}]}.
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

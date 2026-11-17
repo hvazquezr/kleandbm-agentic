@@ -2977,6 +2977,72 @@
         "title": "ResolveIn",
         "type": "object"
       },
+      "RunMessageOut": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment"
+          }
+        },
+        "required": [
+          "run_id",
+          "agent",
+          "parent_run_id",
+          "ordinal",
+          "role",
+          "segment",
+          "content",
+          "created_at"
+        ],
+        "title": "RunMessageOut",
+        "type": "object"
+      },
       "RunOut": {
         "properties": {
           "agent": {
@@ -4471,6 +4537,89 @@
           }
         ],
         "summary": "Get Run",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/messages": {
+      "get": {
+        "description": "The run's transcript (system prompt, briefs, assistant text, thinking and tool calls,\ntool results), followed by those of the runs it started unless include_children is false.",
+        "operationId": "get_run_messages_tenants__tenant_id__projects__project_id__agent_runs__run_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_children",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Children",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RunMessageOut"
+                  },
+                  "title": "Response Get Run Messages Tenants  Tenant Id  Projects  Project Id  Agent Runs  Run Id  Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Run Messages",
         "tags": [
           "conversations"
         ]

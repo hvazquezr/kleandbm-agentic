@@ -9,7 +9,7 @@ import copy
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.persistence.conversations import AgentRun
+from app.persistence.conversations import AgentRun, RunMessage
 from app.persistence.search import DecisionPoint, SearchNode
 from app.persistence.sources import SourceEvidence
 from tests.test_architect import DIM_STORE, FACT_SALES, REL, proj  # noqa: F401
@@ -130,6 +130,24 @@ def test_a_grain_conflict_is_searched_locally_and_the_choice_recorded(proj, monk
     assert m.calls[3]["tools"] == ["propose_alternatives"]
     assert "score_candidates" in m.calls[4]["tools"] and "put_table" not in m.calls[4]["tools"]
 
+    # The search's calls are in the Architect run's transcript, one segment per role, in the
+    # order they happened (between the decision-point tool call and its result).
+    msgs = proj.alice.get(f"{proj.base}/agent-runs/{done['run']['id']}/messages").json()
+    segments = [m["segment"] for m in msgs]
+    search_segs = sorted({sg for sg in segments if sg and sg.startswith("search:")})
+    assert [sg.rsplit(":", 1)[1] for sg in search_segs] == ["evaluator", "generator"]
+    first, last = segments.index(search_segs[1]), max(i for i, sg in enumerate(segments) if sg in search_segs)
+    assert msgs[first - 1]["role"] == "assistant" and msgs[first - 1]["content"]["tool_calls"][0]["name"] == "open_decision_point"
+    assert msgs[last + 1]["role"] == "tool" and msgs[last + 1]["segment"] is None
+    generator = [m for m in msgs if m["segment"] == search_segs[1]]
+    assert [m["role"] for m in generator] == ["system", "user", "assistant"]
+    assert "<decision_brief>" in generator[1]["content"]["text"]
+    evaluator = [m for m in msgs if m["segment"] == search_segs[0]]
+    # The probe, its result, then the scoring turn in the same conversation, stored once each.
+    assert [m["role"] for m in evaluator] == ["system", "user", "assistant", "tool", "assistant"]
+    assert evaluator[3]["content"]["results"][0]["is_error"] is False
+    assert [m["ordinal"] for m in msgs] == list(range(1, len(msgs) + 1))
+
 
 def test_beam_pruning_threshold_and_tie_breaks_across_stages(proj, db_session_factory):
     a = fact("fact_store_profit", "One row per store per day", "operating_cost")
@@ -160,6 +178,11 @@ def test_beam_pruning_threshold_and_tie_breaks_across_stages(proj, db_session_fa
         assert nodes["Monthly with revenue"].stage == "measures" and nodes["Monthly with revenue"].depth == 2
         assert s.scalar(select(DecisionPoint)).status == "selected"
         assert len([n for n in nodes.values() if n.depth]) <= 15
+        # Three generator calls, each a fresh conversation; the prompt is stored in full once.
+        gen = [m for m in s.scalars(select(RunMessage).order_by(RunMessage.ordinal))
+               if (m.segment or "").endswith(":generator") and m.role == "system"]
+        assert len(gen) == 3 and "text" in gen[0].content
+        assert all("text" not in m.content and m.content["sha256"] == gen[0].content["sha256"] for m in gen[1:])
 
 
 def test_a_budget_stop_applies_the_best_partial_and_blocks_readiness(proj, monkeypatch, db_session_factory):

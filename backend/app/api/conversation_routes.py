@@ -101,6 +101,17 @@ class RunOut(BaseModel):
     finished_at: datetime | None
 
 
+class RunMessageOut(BaseModel):
+    run_id: uuid.UUID
+    agent: str
+    parent_run_id: uuid.UUID | None
+    ordinal: int
+    role: str
+    segment: str | None
+    content: dict[str, Any]
+    created_at: datetime
+
+
 @router.post("/conversations", status_code=status.HTTP_201_CREATED)
 def create_conversation(body: ConversationIn, session: SessionDep, scope: ProjectScopeDep) -> ConversationOut:
     c = conversations.create_conversation(session, scope, agent=body.agent, model_id=body.model_id, title=body.title)
@@ -217,3 +228,16 @@ def send_message(
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/agent-runs/{run_id}/messages")
+def get_run_messages(
+    run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep, include_children: bool = True,
+) -> list[RunMessageOut]:
+    """The run's transcript (system prompt, briefs, assistant text, thinking and tool calls,
+    tool results), followed by those of the runs it started unless include_children is false."""
+    return [
+        RunMessageOut(run_id=r.id, agent=r.agent, parent_run_id=r.parent_run_id, ordinal=m.ordinal, role=m.role,
+                      segment=m.segment, content=m.content, created_at=m.created_at)
+        for r, m in conversations.run_transcript(session, scope, run_id, include_children)
+    ]

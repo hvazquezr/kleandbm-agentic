@@ -10,7 +10,9 @@ from app.domain import documents, modeling
 from app.domain.access import NotFoundInScope, Permission, ProjectScope
 from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
-from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
+from app.persistence.conversations import (
+    AgentRun, Conversation, ConversationMessage, MessageRole, RunMessage, RunStatus,
+)
 
 AGENTS = {"business_requirements": "Requirements", "architect": "Architect"}
 
@@ -135,3 +137,24 @@ def child_runs(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> list
         select(AgentRun).where(AgentRun.tenant_id == scope.tenant_id, AgentRun.project_id == scope.project_id,
                                AgentRun.parent_run_id == run_id).order_by(AgentRun.started_at)
     ))
+
+
+def run_transcript(
+    session: Session, scope: ProjectScope, run_id: uuid.UUID, include_children: bool = True,
+) -> list[tuple[AgentRun, RunMessage]]:
+    """What the run's model saw and said, in order, and (by default) the runs it started
+    (consultations, Validator rounds, and theirs), each after its parent's entries."""
+    root = get_run(session, scope, run_id)
+    runs, frontier = [root], [root]
+    while include_children and frontier:
+        frontier = [c for r in frontier for c in child_runs(session, scope, r.id)]
+        runs += frontier
+    by_id = {r.id: r for r in runs}
+    messages = session.scalars(
+        select(RunMessage).where(RunMessage.tenant_id == scope.tenant_id, RunMessage.project_id == scope.project_id,
+                                 RunMessage.run_id.in_(list(by_id)))
+        .order_by(RunMessage.run_id, RunMessage.ordinal))
+    grouped: dict[uuid.UUID, list[RunMessage]] = {}
+    for m in messages:
+        grouped.setdefault(m.run_id, []).append(m)
+    return [(r, m) for r in runs for m in grouped.get(r.id, [])]
