@@ -299,6 +299,9 @@ class DecisionData(_Payload):
     rationale: str | None = Field(default=None, max_length=8000)
     alternatives: list[str] = Field(default_factory=list)
     status: DecisionStatus = DecisionStatus.PROPOSED
+    # What the decision rests on: [{"kind": "source", "evidence_id", "tool"} | {"kind": "document", "citation"}].
+    # An agent's decision about model elements needs some; otherwise it's recorded as an assumption.
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CheckData(_Payload):

@@ -112,6 +112,16 @@ REL = {"from_table": "fact_sales", "from_attribute": "store_key", "to_table": "d
        "to_attribute": "store_key", "cardinality": "many_to_one", "role_name": "", "description": ""}
 
 
+def evidence_ids(transcript) -> list[str]:
+    """Evidence ids from the source tool results so far, as an agent would cite them."""
+    out = []
+    for t in transcript:
+        for r in t.get("results") or [] if t["role"] == "tool" else []:
+            if not r["is_error"] and '"evidence_id"' in r["content"]:
+                out.append(json.loads(r["content"])["evidence_id"])
+    return out
+
+
 def design_steps(p, fact=FACT_SALES):
     return [
         {"text": "Looking at the sources.", "tool_calls": [{"name": "list_sources", "input": {}}]},
@@ -122,9 +132,10 @@ def design_steps(p, fact=FACT_SALES):
                         {"name": "map_requirement", "input": {"requirement_id": p.revenue_req,
                                                               "elements": ["fact_sales.net_amount", "dim_store"],
                                                               "note": ""}}]},
-        {"tool_calls": [{"name": "record_decision", "input": {
+        lambda t: {"tool_calls": [{"name": "record_decision", "input": {
             "kind": "decision", "statement": "Order-line grain for sales", "rationale": "Finest available grain",
-            "alternatives": ["order grain"], "affects_ids": [p.revenue_req], "affects_elements": ["fact_sales"]}},
+            "alternatives": ["order grain"], "affects_ids": [p.revenue_req], "affects_elements": ["fact_sales"],
+            "evidence_ids": evidence_ids(t)[:1], "citations": []}},
             {"name": "update_feasibility", "input": {"requirement_id": p.profit_req, "expected_seq": 0,
                                                      "feasibility_status": "unsupported",
                                                      "feasibility_notes": "No cost data at order grain"}}]},
@@ -140,7 +151,14 @@ def _seq_of(p, record_id):
 def _fix_seq(p, steps):
     """update_feasibility needs the requirement's current seq."""
     seq = _seq_of(p, p.profit_req)
-    steps[4]["tool_calls"][1]["input"]["expected_seq"] = seq
+    step = steps[4]
+
+    def fixed(t):
+        out = step(t) if callable(step) else step
+        out["tool_calls"][1]["input"]["expected_seq"] = seq
+        return out
+
+    steps[4] = fixed
     return steps
 
 

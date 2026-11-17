@@ -40,6 +40,11 @@ NORTHSTAR_PASSWORD = _northstar_password()
 needs_mysql = pytest.mark.skipif(not NORTHSTAR_PASSWORD, reason="Northstar MySQL not loaded (eval/northstar/load.sh)")
 
 
+# Columns the fake source reports for describe_table, so source_refs can be checked against them.
+FAKE_COLUMNS = {"stores": ["store_id", "name", "channel"],
+                "order_lines": ["order_line_id", "order_id", "store_id", "product_id", "quantity", "net_amount"]}
+
+
 class FakeConnector:
     """Records the parameters it was opened with and returns canned results. Set read_only to
     False to simulate an account with write privileges, or fail_connect to simulate a bad password."""
@@ -66,7 +71,10 @@ class FakeConnector:
                     return ToolResult(False, {"schema_fingerprint": FINGERPRINT, "tables": [{"table": "orders"}]}, None)
                 if arguments.get("table") == "missing":
                     return ToolResult(True, None, "unknown table 'missing'")
-                return ToolResult(False, {"schema_fingerprint": FINGERPRINT, "tool": tool, **arguments}, None)
+                extra = {}
+                if tool == "describe_table" and arguments.get("table") in FAKE_COLUMNS:
+                    extra["columns"] = [{"name": c} for c in FAKE_COLUMNS[arguments["table"]]]
+                return ToolResult(False, {"schema_fingerprint": FINGERPRINT, "tool": tool, **arguments, **extra}, None)
 
         yield S()
 

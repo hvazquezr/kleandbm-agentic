@@ -204,6 +204,10 @@ REGISTER_TOOL_SPECS = [
                                  "description": "Requirement or definition ids from get_registers"},
                  "affects_elements": {"type": "array", "items": {"type": "string"},
                                       "description": "Candidate elements: 'table' or 'table.attribute'"},
+                 "evidence_ids": {"type": "array", "items": {"type": "string"},
+                                  "description": "Source evidence ids from your source tool calls that show it"},
+                 "citations": {"type": "array", "items": {"type": "string"},
+                               "description": "Documents you read or searched this run: title, version, location"},
              })),
     ToolSpec("update_feasibility",
              "Set a requirement's feasibility from source evidence. Pass its seq from get_registers.",
@@ -446,9 +450,37 @@ def map_requirement(ctx: ArchitectContext, args: dict) -> dict:
 # --- Register tools -------------------------------------------------------------------------
 
 
+def _decision_evidence(ctx: ArchitectContext, args: dict) -> list[dict[str, Any]]:
+    """Deterministic: evidence ids are this project's successful source calls, and citations
+    name documents this run read or searched."""
+    evidence: list[dict[str, Any]] = []
+    for eid in dict.fromkeys(str(e).strip() for e in args.get("evidence_ids") or [] if str(e).strip()):
+        try:
+            ev_id = uuid.UUID(eid)
+        except ValueError:
+            raise ToolInputError(f"{eid!r} isn't an evidence id; use the evidence_id from a source tool result") from None
+        row = ctx.session.scalar(select(SourceEvidence).where(
+            SourceEvidence.tenant_id == ctx.scope.tenant_id, SourceEvidence.project_id == ctx.scope.project_id,
+            SourceEvidence.id == ev_id))
+        if row is None:
+            raise ToolInputError(f"no source evidence {eid} in this project")
+        if row.is_error:
+            raise ToolInputError(f"evidence {eid} is a failed call ({row.tool}); it shows nothing")
+        evidence.append({"kind": "source", "evidence_id": str(row.id), "tool": row.tool})
+    citations = [c.strip() for c in args.get("citations") or [] if str(c).strip()]
+    rt.check_citations(ctx, citations)
+    return evidence + [{"kind": "document", "citation": c} for c in citations]
+
+
 def record_decision(ctx: ArchitectContext, args: dict) -> dict:
+    evidence = _decision_evidence(ctx, args)
+    if args["kind"] == DecisionKind.DECISION and args.get("affects_elements") and not evidence:
+        # A design decision stated without anything that shows it is an inference: say so.
+        raise ToolInputError("a decision about model elements needs evidence_ids from your source calls or "
+                             "citations of documents you read; if it rests on reasoning alone, record it with "
+                             "kind \"assumption\" (the decision was not recorded)")
     data = {"kind": args["kind"], "statement": args["statement"], "rationale": _none_if_empty(args.get("rationale")),
-            "alternatives": [a for a in args.get("alternatives") or [] if a.strip()]}
+            "alternatives": [a for a in args.get("alternatives") or [] if a.strip()], "evidence": evidence}
     ops: list = [CreateOp(type=RecordType.DECISION, ref="d", data=data)]
     for target in args.get("affects_ids") or []:
         ops.append(LinkOp(from_id="$d", to_id=_uuid(target), link_type=LinkType.AFFECTS))
@@ -464,9 +496,38 @@ def record_decision(ctx: ArchitectContext, args: dict) -> dict:
     return {**entry, "elements": elements, "summary": f"Recorded {entry['code']}: {args['statement'][:80]}"}
 
 
+def _open_meaning_issues(ctx: ArchitectContext, rid: uuid.UUID) -> list[str]:
+    """Open blocking questions about the requirement or the definitions it uses, and unresolved
+    conflicts between those definitions and others. Unconfirmed alone doesn't count: every
+    definition an agent records starts unconfirmed."""
+    seq = modeling.current_seq(ctx.session, ctx.scope)
+    definitions = {d.id: d for d in modeling._latest(ctx.session, ctx.scope, RecordType.DEFINITION, as_of=seq)}
+    links = modeling.list_live_links(ctx.session, ctx.scope)
+    used = {l.to_id for l in links if l.link_type is LinkType.USES_DEFINITION and l.from_id == rid}
+    concerned = {rid, *used}
+    issues = [f"{q.code} is open and blocking" for q in ctx.open_questions()
+              if q.data.get("is_blocking") and any(l.link_type is LinkType.CONCERNS and l.from_id == q.id
+                                                    and l.to_id in concerned for l in links)]
+    records = {**definitions, **{r.id: r for r in ctx.requirements()}}
+    rejected = {r.id for r in records.values() if str(r.data.get("confirmation_status")) == "rejected"}
+    for l in links:  # conflicts of the requirement itself, or of a definition it uses
+        if l.link_type is not LinkType.CONFLICTS_WITH or rejected & {l.from_id, l.to_id}:
+            continue
+        for mine, other in ((l.from_id, l.to_id), (l.to_id, l.from_id)):
+            if mine in concerned and other in records:
+                a, b = records.get(mine), records[other]
+                label = b.data.get("term") or b.data.get("statement", "")[:60]
+                issues.append(f"{a.code if a else mine} conflicts with {b.code} ({label})")
+    return list(dict.fromkeys(issues))
+
+
 def _check_full_support(ctx: ArchitectContext, rid: uuid.UUID) -> None:
     """Deterministic: fully_supported needs the requirement mapped to candidate elements whose
     tables are verified against the source schema the source tools returned."""
+    if open_issues := _open_meaning_issues(ctx, rid):
+        raise ToolInputError("fully_supported can't stand while the requirement's meaning is still open: "
+                             f"{'; '.join(open_issues)}. Use partially_supported and name what's open in "
+                             "feasibility_notes; a person settles it")
     mapping = next((m for m in ctx.candidate.content["mappings"] if m["requirement_id"] == str(rid)), None)
     if not mapping or not mapping["elements"]:
         raise ToolInputError("map the requirement to the elements that answer it (map_requirement) before marking "

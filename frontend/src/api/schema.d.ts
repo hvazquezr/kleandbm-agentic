@@ -1216,6 +1216,10 @@ export interface components {
         DecisionData: {
             /** Alternatives */
             alternatives?: string[];
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            }[];
             kind: components["schemas"]["DecisionKind"];
             /** Rationale */
             rationale?: string | null;
