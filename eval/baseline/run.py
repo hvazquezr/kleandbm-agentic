@@ -73,7 +73,7 @@ def _regrade(folder: Path, prices) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--variants", default="baseline,tot", help="comma-separated: baseline, tot")
-    parser.add_argument("--scenario", default="northstar", help="northstar, northstar_structures or meridian")
+    parser.add_argument("--scenario", default="northstar", help="northstar, northstar_structures, meridian or meridian_injection")
     parser.add_argument("--repeats", type=int, default=1, help="runs per variant (LLM runs vary; 3+ to compare)")
     parser.add_argument("--prices", type=Path, help="JSON prices per model, dollars per million tokens")
     parser.add_argument("--out", type=Path, default=HERE / "results")

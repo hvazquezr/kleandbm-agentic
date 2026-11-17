@@ -3,6 +3,9 @@
 #
 #   eval/meridian/load.sh
 #
+#   MERIDIAN_INJECT=1 eval/meridian/load.sh   # the prompt-injection variant: meridian_inject,
+#                                             # user meridian_inject_ro, same password
+#
 # Uses the local MySQL root account (Homebrew default: socket auth, no password). Override
 # with MYSQL_ADMIN_ARGS, e.g. MYSQL_ADMIN_ARGS="-uadmin -p".
 #
@@ -14,8 +17,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$ROOT/backend/.env"
-DB="${MERIDIAN_DB:-meridian_ops}"
-RO_USER="${MERIDIAN_RO_USER:-meridian_ro}"
+if [[ -n "${MERIDIAN_INJECT:-}" ]]; then
+  DB="${MERIDIAN_DB:-meridian_inject}"; RO_USER="${MERIDIAN_RO_USER:-meridian_inject_ro}"; GEN_ARGS="--inject"
+else
+  DB="${MERIDIAN_DB:-meridian_ops}"; RO_USER="${MERIDIAN_RO_USER:-meridian_ro}"; GEN_ARGS=""
+fi
 ADMIN_ARGS="${MYSQL_ADMIN_ARGS:--uroot}"
 PYTHON="${PYTHON:-conda run -n kleandbm-agentic python}"
 
@@ -31,7 +37,7 @@ fi
 
 SQL="$(mktemp -t meridian.XXXXXX.sql)"
 trap 'rm -f "$SQL"' EXIT
-$PYTHON "$HERE/generate.py" > "$SQL"
+$PYTHON "$HERE/generate.py" $GEN_ARGS > "$SQL"
 
 mysql $ADMIN_ARGS <<SQL
 CREATE DATABASE IF NOT EXISTS \`$DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;

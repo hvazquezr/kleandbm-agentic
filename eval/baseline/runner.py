@@ -34,14 +34,15 @@ def run_once(user, scenario: Scenario, variant: str, password: str, settings, *,
     seconds = time.monotonic() - started
     events = [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
     done = events[-1] if events and events[-1].get("type") == "done" else {"status": "failed", "detail": resp.text[:500]}
-    record = collect(fresh_user() if fresh_user else user, ids, done, seconds)
+    record = collect(fresh_user() if fresh_user else user, ids, done, seconds, markers=scenario.markers)
     record.update(variant=variant, scenario=scenario.name,
                   tools=[f"{e['status']}: {e['summary']}" for e in events if e.get("type") == "tool" and e.get("status") != "started"])
     record["grade"] = grade(record)
     return record
 
 
-def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> dict[str, Any]:
+def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
+            markers: dict[str, str] | None = None) -> dict[str, Any]:
     """Everything the comparison needs, read back through the API as a person would see it."""
     base = ids["base"]
     snap = user.get(f"{base}/models/{ids['model']}/snapshot").json()
@@ -80,6 +81,9 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> 
             "blockers": cand["blockers"], "hard_failures": cand["hard_failures"],
             "review_rounds": len(rounds), "reviewed": last is not None, "findings": counts,
             "correction_attempts": cand.get("issue_attempts") or {},
+            "finding_texts": [{"status": f["status"], "issue_key": f.get("issue_key"), "summary": f.get("summary"),
+                               "recommended_action": f.get("recommended_action")}
+                              for f in (last or {}).get("findings", [])],
         }
         for dp in user.get(f"{base}/candidates/{cand_id}/decision-points").json():
             record["decision_points"].append({
@@ -91,7 +95,30 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float) -> 
     run_id = (done.get("run") or {}).get("id")
     if run_id:
         record["usage"] = usage(user, base, run_id)
+        if markers:
+            record["exposure"] = exposure(user.get(f"{base}/agent-runs/{run_id}/messages").json(), markers)
     return record
+
+
+def exposure(messages: list[dict[str, Any]], markers: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Where each planted marker appeared in the run and its child runs: how many tool results
+    showed it to an agent (by agent), and which tool calls an agent made with it in the arguments.
+    A plant nobody saw tests nothing, so the grader reports exposure next to each verdict."""
+    out = {name: {"seen": {}, "tool_calls": []} for name in markers}
+    for m in messages:
+        if m["role"] == "tool":
+            for r in m["content"].get("results") or []:
+                text = json.dumps(r.get("content"), default=str).lower()
+                for name, marker in markers.items():
+                    if marker.lower() in text:
+                        out[name]["seen"][m["agent"]] = out[name]["seen"].get(m["agent"], 0) + 1
+        elif m["role"] == "assistant":
+            for call in m["content"].get("tool_calls") or []:
+                args = json.dumps(call.get("input", call.get("arguments")), default=str).lower()
+                for name, marker in markers.items():
+                    if marker.lower() in args:
+                        out[name]["tool_calls"].append(f"{m['agent']}:{call.get('name')}")
+    return out
 
 
 def _relationship(data: dict[str, Any], snap: dict[str, Any]) -> dict[str, Any]:
