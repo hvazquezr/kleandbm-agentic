@@ -14,6 +14,8 @@ from typing import Any, Protocol
 
 from anyio.from_thread import BlockingPortal, start_blocking_portal
 
+from app.adapters.personal_data import mask_result, mask_text
+
 # Tools the backend lets anyone call. The server may grow tools, but nothing reaches users or
 # agents until it's added here deliberately.
 ALLOWED_TOOLS = frozenset({
@@ -89,8 +91,13 @@ class _McpSession:
         if result.is_error:
             text = " ".join(getattr(c, "text", "") for c in (result.content or [])).strip()
             text = text.removeprefix(f"Error executing tool {tool}: ")  # the SDK's generic wrapper
-            return ToolResult(True, None, text[:2000] or "tool error")
-        data, truncated = _cap(result.structured_content or {}, self._max_bytes)
+            return ToolResult(True, None, mask_text(text[:2000])[0] or "tool error")
+        # Personal data the server's column masking didn't catch is masked here, before the
+        # result is stored as evidence or reaches an agent.
+        data, masked = mask_result(result.structured_content or {})
+        if masked:
+            data["personal_data_masked"] = masked
+        data, truncated = _cap(data, self._max_bytes)
         return ToolResult(False, data, None, truncated)
 
 
