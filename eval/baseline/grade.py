@@ -149,7 +149,7 @@ def grade_structures(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 SHIPMENT_GRAIN = re.compile(r"shipment", re.I)
 MONEY = re.compile(r"amount|sales|revenue|\bnet\b|net_", re.I)
-SHIPPED_QTY = re.compile(r"quantity_shipped|shipped[ _]quantity|qty_shipped|shipped_qty|shipped[ _]units", re.I)
+SHIPPED_QTY = re.compile(r"quantity_shipped|shipped[ _]quantity|qty_shipped|shipped_qty|shipped[ _]units|units[ _]shipped", re.I)
 MILESTONE = re.compile(r"first|final|last|latest|promised|count|days|quantity|qty|units", re.I)
 SHIP_EVENT = re.compile(r"ship(ped)?_?(date|at|month)|carrier|shipment_(id|key|number)", re.I)
 INVENTORY = re.compile(r"inventory|stock|on_?hand", re.I)

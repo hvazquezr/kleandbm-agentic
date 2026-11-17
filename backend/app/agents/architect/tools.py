@@ -293,8 +293,8 @@ READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_docu
 QUESTION_SPEC = next(s for s in rt.TOOL_SPECS if s.name == "raise_question")
 # Only the tools that write structured content are strict: all of them together exceed the
 # provider's grammar size limit. The rest have simple inputs that the handlers validate.
-STRICT_TOOLS = {"put_table", "put_relationships", "map_requirement", "record_decision", "update_feasibility",
-                "raise_question"}
+# record_decision's nested claims tipped it over, so it's validated in its handler instead.
+STRICT_TOOLS = {"put_table", "put_relationships", "map_requirement", "update_feasibility", "raise_question"}
 TOOL_SPECS = [replace(s, strict=s.name in STRICT_TOOLS)
               for s in READ_SPECS + SOURCE_TOOL_SPECS + CANDIDATE_TOOL_SPECS + REGISTER_TOOL_SPECS
               + [CONSULT_SPEC, DECISION_POINT_SPEC, QUESTION_SPEC]]
@@ -560,8 +560,15 @@ def _claims(ctx: ArchitectContext, raw: list[dict]) -> list[dict[str, Any]]:
     a document shows what a value means. Whether the evidence shows *this* statement is the
     Validator's judgement."""
     out = []
-    for i, c in enumerate(raw or [], 1):
-        kind = ClaimKind(c["kind"])
+    if not isinstance(raw, list):
+        raise ToolInputError("claims must be a list of objects")
+    for i, c in enumerate(raw, 1):
+        if not isinstance(c, dict):
+            raise ToolInputError(f"claim {i} must be an object with kind, statement, about and evidence")
+        try:
+            kind = ClaimKind(c.get("kind"))
+        except ValueError:
+            raise ToolInputError(f"claim {i}: kind must be one of {', '.join(k.value for k in ClaimKind)}") from None
         about = [str(a).strip() for a in c.get("about") or [] if str(a).strip()]
         label = f"claim {i} ({kind.value}{f' about {chr(44).join(about)}' if about else ''})"
         rows = _evidence_rows(ctx, c.get("evidence_ids"))
@@ -598,6 +605,12 @@ def _claims(ctx: ArchitectContext, raw: list[dict]) -> list[dict[str, Any]]:
 
 
 def record_decision(ctx: ArchitectContext, args: dict) -> dict:
+    # Not a strict tool (its claims schema would push the grammar past the provider's limit), so
+    # the shape is checked here.
+    if args.get("kind") not in {k.value for k in DecisionKind}:
+        raise ToolInputError(f"kind must be one of {', '.join(k.value for k in DecisionKind)}")
+    if not str(args.get("statement") or "").strip():
+        raise ToolInputError("statement is required")
     claims = _claims(ctx, args.get("claims") or [])
     if args["kind"] == DecisionKind.DECISION and args.get("affects_elements") and not claims:
         # A design decision stated without anything that shows it is an inference: say so.
@@ -606,7 +619,7 @@ def record_decision(ctx: ArchitectContext, args: dict) -> dict:
                              "rests on reasoning alone, record it with kind \"assumption\" (nothing was recorded)")
     evidence = list({json.dumps(e, sort_keys=True): e for c in claims for e in c["evidence"]}.values())
     data = {"kind": args["kind"], "statement": args["statement"], "rationale": _none_if_empty(args.get("rationale")),
-            "alternatives": [a for a in args.get("alternatives") or [] if a.strip()], "evidence": evidence,
+            "alternatives": [str(a) for a in args.get("alternatives") or [] if str(a).strip()], "evidence": evidence,
             "claims": claims}
     revises = _none_if_empty(args.get("revises_id"))
     links = modeling.list_live_links(ctx.session, ctx.scope)

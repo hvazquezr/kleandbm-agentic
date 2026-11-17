@@ -296,6 +296,27 @@ def test_a_decision_about_elements_needs_a_claim_or_becomes_an_assumption(proj):
     assert c["kind"] == "exists" and c["about"] == ["order_lines"] and c["evidence"] == [source]
 
 
+def test_record_decision_checks_its_own_input(proj):
+    """record_decision isn't a strict tool (its claims schema pushed the provider's grammar past its
+    size limit), so a malformed call must come back as a readable tool error."""
+    from app.agents.architect.tools import TOOL_SPECS
+
+    assert not next(s for s in TOOL_SPECS if s.name == "record_decision").strict
+    results = _claim_run(
+        proj,
+        {"tool_calls": [_decision(kind="guess")]},
+        {"tool_calls": [_decision(statement=" ")]},
+        {"tool_calls": [_decision(claims=[{"kind": "vibes", "about": ["order_lines"]}])]},
+        {"tool_calls": [_decision(claims=["order_lines exists"])]},
+        {"tool_calls": [_decision(claims={"kind": "exists"})]})
+    kind, statement, claim_kind, not_object, not_list = results[-5:]
+    assert all(r["is_error"] for r in results[-5:])
+    assert "kind must be one of" in kind["content"] and "statement is required" in statement["content"]
+    assert "claim 1: kind must be one of" in claim_kind["content"]
+    assert "must be an object" in not_object["content"] and "must be a list" in not_list["content"]
+    assert proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()["decisions"] == []
+
+
 def test_evidence_must_be_the_kind_that_shows_the_claim(proj):
     from tests.test_architect import claim
 
