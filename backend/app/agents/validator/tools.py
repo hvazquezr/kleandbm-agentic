@@ -3,6 +3,7 @@ sources, plus record_finding and submit_review. Findings are kept on the candida
 round, never written to the model directly; they become CHECK records when the candidate is
 applied. The Validator has no tool that edits the candidate or the registers."""
 
+import json
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -14,8 +15,8 @@ from app.agents.architect import tools as at
 from app.agents.requirements import tools as rt
 from app.agents.requirements.tools import _enum, _none_if_empty, _obj, _opt
 from app.agents.runtime import ToolInputError
-from app.domain import design
-from app.domain.records import CheckStatus, CheckType
+from app.domain import design, modeling
+from app.domain.records import CheckStatus, CheckType, DecisionKind, DecisionStatus
 from app.persistence.sources import SourceEvidence
 
 
@@ -58,14 +59,53 @@ SUBMIT_SPEC = ToolSpec(
 GET_CANDIDATE_SPEC = ToolSpec(
     "get_candidate",
     "The design candidate under review: tables with full attribute details, relationships, requirement "
-    "mappings, decision links, the Architect's internal check results, and which existing elements a "
-    "person edited.",
+    "mappings, decision links, the design decisions to review with their claims and cited evidence "
+    "results, the Architect's internal check results, and which existing elements a person edited.",
     _obj({}),
 )
 
 READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents")]
 TOOL_SPECS = [replace(s, strict=s.name in {"record_finding"})
               for s in [GET_CANDIDATE_SPEC, *READ_SPECS, *at.SOURCE_TOOL_SPECS, FINDING_SPEC, SUBMIT_SPEC]]
+
+
+_DONE = {DecisionStatus.CONFIRMED.value, DecisionStatus.REJECTED.value, DecisionStatus.SUPERSEDED.value}
+
+
+def _clip(value: Any, limit: int = 2000) -> Any:
+    text = json.dumps(value, default=str)
+    return value if len(text) <= limit else f"{text[:limit]} …[{len(text) - limit} characters cut]"
+
+
+def decisions_to_review(session, scope, candidate) -> list[dict[str, Any]]:
+    """Design decisions linked to the candidate that no person has settled, with each claim's
+    cited evidence and its stored result, so the Validator judges what the evidence shows."""
+    elements: dict[str, list[str]] = {}
+    for link in candidate.content.get("decision_links", []):
+        elements.setdefault(link["decision_id"], []).extend(link["elements"])
+    out = []
+    for did, elems in elements.items():
+        try:
+            view = modeling.get_record(session, scope, uuid.UUID(did))
+        except Exception:
+            continue
+        d = view.data
+        if d.get("kind") != DecisionKind.DECISION.value or str(d.get("status")) in _DONE:
+            continue
+        ids = {e["evidence_id"] for e in d.get("evidence") or [] if e.get("kind") == "source"}
+        rows = {str(r.id): r for r in session.scalars(select(SourceEvidence).where(
+            SourceEvidence.tenant_id == scope.tenant_id, SourceEvidence.project_id == scope.project_id,
+            SourceEvidence.id.in_([uuid.UUID(i) for i in ids])))} if ids else {}
+
+        def shown(evidence: list[dict]) -> list[dict]:
+            return [{**e, "arguments": rows[e["evidence_id"]].arguments, "result": _clip(rows[e["evidence_id"]].result)}
+                    if e.get("evidence_id") in rows else e for e in evidence]
+        out.append({"id": did, "code": view.code, "issue_key": f"decision_support:{view.code}",
+                    "statement": d.get("statement"), "rationale": d.get("rationale"),
+                    "elements": list(dict.fromkeys(elems)),
+                    "claims": [{**c, "evidence": shown(c.get("evidence") or [])} for c in d.get("claims") or []],
+                    **({} if d.get("claims") else {"evidence": shown(d.get("evidence") or [])})})
+    return out
 
 
 def get_candidate(ctx: ValidatorContext, _: dict) -> dict:
@@ -86,7 +126,7 @@ def get_candidate(ctx: ValidatorContext, _: dict) -> dict:
             for r in content["relationships"]]
     return {"candidate_id": str(c.id), "base_seq": c.base_seq, "tables": tables, "relationships": rels,
             "mappings": content["mappings"], "decision_links": content["decision_links"],
-            "internal_checks": c.internal_checks,
+            "decisions": decisions_to_review(ctx.session, ctx.scope, c), "internal_checks": c.internal_checks,
             "summary": f"Read candidate ({len(tables)} tables, {len(rels)} relationships)"}
 
 
@@ -151,6 +191,10 @@ def record_finding(ctx: ValidatorContext, args: dict) -> dict:
 def submit_review(ctx: ValidatorContext, args: dict) -> dict:
     if not ctx.findings:
         raise ToolInputError("record your findings (including what passed) before submitting")
+    missing = [d["code"] for d in decisions_to_review(ctx.session, ctx.scope, ctx.candidate) if d["issue_key"] not in ctx.findings]
+    if missing:
+        raise ToolInputError("record a decision_support:<code> finding for each design decision before submitting: "
+                             f"{', '.join(missing)} (passed only if its evidence shows the statement)")
     ctx.summary = str(args.get("summary") or "").strip()[:4000]
     counts = {s.value: sum(1 for f in ctx.findings.values() if f["status"] == s.value) for s in CheckStatus}
     return {"ok": True, "summary": f"Review submitted ({', '.join(f'{n} {k}' for k, n in counts.items())})"}

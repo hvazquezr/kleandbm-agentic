@@ -122,6 +122,11 @@ def evidence_ids(transcript) -> list[str]:
     return out
 
 
+def claim(kind, statement, about, evidence=(), citations=()):
+    return {"kind": kind, "statement": statement, "about": list(about), "evidence_ids": list(evidence),
+            "citations": list(citations)}
+
+
 def design_steps(p, fact=FACT_SALES):
     return [
         {"text": "Looking at the sources.", "tool_calls": [{"name": "list_sources", "input": {}}]},
@@ -135,7 +140,8 @@ def design_steps(p, fact=FACT_SALES):
         lambda t: {"tool_calls": [{"name": "record_decision", "input": {
             "kind": "decision", "statement": "Order-line grain for sales", "rationale": "Finest available grain",
             "alternatives": ["order grain"], "affects_ids": [p.revenue_req], "affects_elements": ["fact_sales"],
-            "evidence_ids": evidence_ids(t)[:1], "citations": []}},
+            "claims": [claim("exists", "order_lines has the line columns", ["order_lines"], evidence_ids(t)[:1])],
+            "revises_id": "", "expected_seq": 0}},
             {"name": "update_feasibility", "input": {"requirement_id": p.profit_req, "expected_seq": 0,
                                                      "feasibility_status": "unsupported",
                                                      "feasibility_notes": "No cost data at order grain"}}]},

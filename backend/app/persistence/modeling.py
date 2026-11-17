@@ -299,6 +299,7 @@ class DecisionRevision(RevisionMixin, Base):
         _enum(DecisionStatus, "decision_status"), nullable=False
     )
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    claims: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
 
 class CheckRevision(RevisionMixin, Base):

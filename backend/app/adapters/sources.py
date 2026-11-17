@@ -20,7 +20,7 @@ from app.adapters.personal_data import mask_result, mask_text
 # agents until it's added here deliberately.
 ALLOWED_TOOLS = frozenset({
     "list_tables", "describe_table", "row_count", "column_profile", "candidate_key_check",
-    "relationship_check", "sample_rows", "schema_fingerprint",
+    "relationship_check", "coverage_check", "sample_rows", "schema_fingerprint",
 })
 
 

@@ -255,6 +255,15 @@ def test_mcp_tools_reveal_northstar_traps():
         profile = session.call("column_profile", {"table": "orders", "columns": ["customer_id"]}).data
         assert profile["columns"][0]["null_rate"] > 0.1
 
+        # Coverage, which a key check can't show: does every store have every cost type each day?
+        cov = session.call("coverage_check", {"table": "store_daily_costs", "columns": ["cost_type"],
+                                              "group_by": ["store_id", "cost_date"]}).data
+        assert cov["combinations_expected_per_group"] == cov["distinct_values_per_column"]["cost_type"] > 1
+        assert cov["groups"] > 0 and cov["groups_complete"] <= cov["groups"]
+        assert cov["is_complete"] == (cov["groups_complete"] == cov["groups"])
+        assert session.call("coverage_check", {"table": "orders", "columns": ["status"],
+                                               "group_by": ["status"]}).is_error
+
         # Identifiers outside the schema are refused before any SQL runs.
         bad = session.call("describe_table", {"table": "orders; DROP TABLE orders"})
         assert bad.is_error and "unknown table" in bad.error

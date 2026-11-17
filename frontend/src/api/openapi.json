@@ -1149,6 +1149,14 @@
             "title": "Alternatives",
             "type": "array"
           },
+          "claims": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
           "evidence": {
             "items": {
               "additionalProperties": true,

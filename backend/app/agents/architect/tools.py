@@ -9,6 +9,7 @@
   scoped domain services as people, so the agent-authority guard applies.
 """
 
+import json
 import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
@@ -29,6 +30,7 @@ from app.domain.modeling import CreateOp, LinkOp, UpdateOp
 from app.domain.records import (
     AttributeRole,
     Cardinality,
+    ClaimKind,
     DecisionKind,
     FeasibilityStatus,
     LinkType,
@@ -139,6 +141,20 @@ _RELATIONSHIP = _obj({
     "description": _opt("What the relationship means."),
 })
 
+_CLAIM = _obj({
+    "kind": {**_enum(ClaimKind), "description": (
+        "exists (describe_table), volume (row_count), distribution (column_profile), uniqueness of a grain or "
+        "key (candidate_key_check), relationship and cardinality (relationship_check), coverage: every "
+        "combination occurs (coverage_check), value_meaning: what a value means for the business (a document)")},
+    "statement": {"type": "string", "description": "The claim in one sentence."},
+    "about": {"type": "array", "items": {"type": "string"},
+              "description": "Source 'table' or 'table.column' names the claim is about"},
+    "evidence_ids": {"type": "array", "items": {"type": "string"},
+                     "description": "Source evidence ids from your source tool calls that show it"},
+    "citations": {"type": "array", "items": {"type": "string"},
+                  "description": "Documents you read or searched this run: title, version, location"},
+})
+
 SOURCE_TOOL_SPECS = [
     ToolSpec("list_sources", "The data sources linked to this model, with their ids.", _obj({})),
     ToolSpec("source_list_tables", "Tables and views in a source, with approximate row counts and comments.",
@@ -156,6 +172,13 @@ SOURCE_TOOL_SPECS = [
              "joins and cardinality and to detect fan-out that would duplicate measures.",
              _obj({"source_id": _SOURCE, "child_table": {"type": "string"}, "child_columns": _COLUMNS,
                    "parent_table": {"type": "string"}, "parent_columns": _COLUMNS, "purpose": _PURPOSE})),
+    ToolSpec("source_coverage_check",
+             "Whether every combination of the columns' distinct values occurs, overall or within each group_by "
+             "group (e.g. every DC x product in each inventory run). Use it to show completeness: a key check "
+             "shows each combination occurs at most once, never that it occurs.",
+             _obj({"source_id": _SOURCE, "table": {"type": "string"}, "columns": _COLUMNS,
+                   "group_by": {**_COLUMNS, "description": "Grouping columns; empty = the whole table"},
+                   "purpose": _PURPOSE})),
     ToolSpec("source_sample_rows", "Up to 20 rows ordered by primary key. Empty columns = all.",
              _obj({"source_id": _SOURCE, "table": {"type": "string"}, "limit": {"type": "integer", "description": "1 to 20"},
                    "columns": _COLUMNS, "purpose": _PURPOSE})),
@@ -204,10 +227,11 @@ REGISTER_TOOL_SPECS = [
                                  "description": "Requirement or definition ids from get_registers"},
                  "affects_elements": {"type": "array", "items": {"type": "string"},
                                       "description": "Candidate elements: 'table' or 'table.attribute'"},
-                 "evidence_ids": {"type": "array", "items": {"type": "string"},
-                                  "description": "Source evidence ids from your source tool calls that show it"},
-                 "citations": {"type": "array", "items": {"type": "string"},
-                               "description": "Documents you read or searched this run: title, version, location"},
+                 "claims": {"type": "array", "items": _CLAIM,
+                            "description": "What the decision asserts about the source, each with the evidence "
+                                           "that shows it. A decision about model elements needs at least one."},
+                 "revises_id": _opt("To correct a decision you recorded earlier, its id; empty for a new one."),
+                 "expected_seq": {"type": "integer", "description": "The seq of the decision you revise; 0 otherwise."},
              })),
     ToolSpec("update_feasibility",
              "Set a requirement's feasibility from source evidence. Pass its seq from get_registers.",
@@ -330,6 +354,8 @@ SOURCE_HANDLERS = {
     "source_relationship_check": lambda ctx, a: _source_call(ctx, a, "relationship_check", {
         "child_table": a["child_table"], "child_columns": _cols(a.get("child_columns")) or [],
         "parent_table": a["parent_table"], "parent_columns": _cols(a.get("parent_columns")) or []}),
+    "source_coverage_check": lambda ctx, a: _source_call(ctx, a, "coverage_check", {
+        "table": a["table"], "columns": _cols(a.get("columns")) or [], "group_by": _cols(a.get("group_by"))}),
     "source_sample_rows": lambda ctx, a: _source_call(ctx, a, "sample_rows", {
         "table": a["table"], "limit": max(1, min(int(a.get("limit") or 10), 20)), "columns": _cols(a.get("columns"))}),
 }
@@ -450,11 +476,10 @@ def map_requirement(ctx: ArchitectContext, args: dict) -> dict:
 # --- Register tools -------------------------------------------------------------------------
 
 
-def _decision_evidence(ctx: ArchitectContext, args: dict) -> list[dict[str, Any]]:
-    """Deterministic: evidence ids are this project's successful source calls, and citations
-    name documents this run read or searched."""
-    evidence: list[dict[str, Any]] = []
-    for eid in dict.fromkeys(str(e).strip() for e in args.get("evidence_ids") or [] if str(e).strip()):
+def _evidence_rows(ctx: ArchitectContext, ids: list[Any]) -> list[SourceEvidence]:
+    """Deterministic: evidence ids are this project's successful source calls."""
+    rows = []
+    for eid in dict.fromkeys(str(e).strip() for e in ids or [] if str(e).strip()):
         try:
             ev_id = uuid.UUID(eid)
         except ValueError:
@@ -466,34 +491,156 @@ def _decision_evidence(ctx: ArchitectContext, args: dict) -> list[dict[str, Any]
             raise ToolInputError(f"no source evidence {eid} in this project")
         if row.is_error:
             raise ToolInputError(f"evidence {eid} is a failed call ({row.tool}); it shows nothing")
-        evidence.append({"kind": "source", "evidence_id": str(row.id), "tool": row.tool})
-    citations = [c.strip() for c in args.get("citations") or [] if str(c).strip()]
-    rt.check_citations(ctx, citations)
-    return evidence + [{"kind": "document", "citation": c} for c in citations]
+        rows.append(row)
+    return rows
+
+
+# What each source tool shows, and the tool that shows each kind of claim.
+_SHOWS = {"list_tables": "which tables exist", "describe_table": "which columns exist", "row_count": "a row count",
+          "column_profile": "a distribution", "candidate_key_check": "uniqueness",
+          "relationship_check": "a relationship", "coverage_check": "coverage", "sample_rows": "example rows"}
+_NEEDS = {ClaimKind.EXISTS: "source_describe_table on it", ClaimKind.VOLUME: "source_row_count on it",
+          ClaimKind.DISTRIBUTION: "source_column_profile on those columns",
+          ClaimKind.UNIQUENESS: "source_candidate_key_check on those columns",
+          ClaimKind.RELATIONSHIP: "source_relationship_check between those tables and columns",
+          ClaimKind.COVERAGE: "source_coverage_check on those columns"}
+
+
+def _lower(values: Any) -> set[str]:
+    return {str(v).lower() for v in values or []}
+
+
+def _about(about: list[str]) -> dict[str, set[str]]:
+    """Source names -> {table: columns}. A database prefix (db.table.column) is dropped."""
+    out: dict[str, set[str]] = {}
+    for name in about:
+        parts = [p.strip().strip("`").lower() for p in name.split(".") if p.strip()]
+        if len(parts) == 3:
+            parts = parts[1:]
+        if parts:
+            out.setdefault(parts[0], set()).update(parts[1:2])
+    return out
+
+
+def _tables_of(row: SourceEvidence) -> set[str]:
+    a = row.arguments or {}
+    return _lower([a.get("table"), a.get("child_table"), a.get("parent_table")]) - {"none"}
+
+
+def _shows(kind: ClaimKind, row: SourceEvidence, table: str, cols: set[str]) -> bool:
+    """Whether this evidence shows a claim of this kind about these columns of this table."""
+    a, tool = row.arguments or {}, row.tool
+    if kind is ClaimKind.EXISTS:
+        if tool == "list_tables":
+            return not cols and table in _lower(t.get("table") for t in (row.result or {}).get("tables") or [])
+        return (tool == "describe_table" and str(a.get("table")).lower() == table
+                and cols <= _lower(c.get("name") for c in (row.result or {}).get("columns") or []))
+    if table not in _tables_of(row):
+        return False
+    if kind is ClaimKind.VOLUME:
+        return tool == "row_count"
+    if kind is ClaimKind.DISTRIBUTION:
+        return tool == "column_profile" and (not a.get("columns") or cols <= _lower(a["columns"]))
+    if kind is ClaimKind.UNIQUENESS:  # a key on fewer columns makes the claimed set unique too
+        return tool == "candidate_key_check" and (not cols or _lower(a.get("columns")) <= cols)
+    if kind is ClaimKind.COVERAGE:
+        checked, groups = _lower(a.get("columns")), _lower(a.get("group_by"))
+        return tool == "coverage_check" and (not cols or checked <= cols <= checked | groups)
+    if kind is ClaimKind.RELATIONSHIP:
+        side = (_lower(a.get("child_columns")) if str(a.get("child_table")).lower() == table
+                else _lower(a.get("parent_columns")))
+        return tool == "relationship_check" and cols <= side
+    return False
+
+
+def _claims(ctx: ArchitectContext, raw: list[dict]) -> list[dict[str, Any]]:
+    """Deterministic: each claim's evidence must be of the kind that can show it and about what it
+    names. A key check shows uniqueness, never coverage; a sample shows examples, never a rule; only
+    a document shows what a value means. Whether the evidence shows *this* statement is the
+    Validator's judgement."""
+    out = []
+    for i, c in enumerate(raw or [], 1):
+        kind = ClaimKind(c["kind"])
+        about = [str(a).strip() for a in c.get("about") or [] if str(a).strip()]
+        label = f"claim {i} ({kind.value}{f' about {chr(44).join(about)}' if about else ''})"
+        rows = _evidence_rows(ctx, c.get("evidence_ids"))
+        citations = [x.strip() for x in c.get("citations") or [] if str(x).strip()]
+        rt.check_citations(ctx, citations)
+        targets = _about(about)
+        if kind is ClaimKind.VALUE_MEANING:
+            if not citations:
+                raise ToolInputError(f"{label}: what a value means is shown by a document, not by the data; cite "
+                                     "the passage, or ask_requirements, or record it as an assumption")
+        else:
+            if not targets:
+                raise ToolInputError(f"{label}: name the source table or table.column it's about")
+            if not rows:
+                raise ToolInputError(f"{label}: needs source evidence ({_NEEDS[kind]}); documents can't show "
+                                     "what the data holds")
+            for row in rows:
+                if row.tool != "list_tables" and not _tables_of(row) & set(targets):
+                    raise ToolInputError(f"{label}: evidence {row.id} ({row.tool} on "
+                                         f"{', '.join(sorted(_tables_of(row)))}) isn't about {', '.join(targets)}")
+            for table, cols in targets.items():
+                if not any(_shows(kind, r, table, cols) for r in rows):
+                    cited = sorted({_SHOWS.get(r.tool, r.tool) for r in rows if table in _tables_of(r)
+                                    or r.tool == "list_tables"})
+                    shown = f"the evidence cited shows {', '.join(cited)}, not {kind.value}" if cited else \
+                        f"no evidence cited is about {table}"
+                    raise ToolInputError(f"{label}: {shown}{f' of {chr(44).join(sorted(cols))}' if cols else ''}. "
+                                         f"Run {_NEEDS[kind]} and cite it, or record the decision as an assumption "
+                                         "(nothing was recorded)")
+        out.append({"kind": kind.value, "statement": str(c.get("statement") or "").strip()[:2000], "about": about,
+                    "evidence": [{"kind": "source", "evidence_id": str(r.id), "tool": r.tool} for r in rows]
+                    + [{"kind": "document", "citation": x} for x in citations]})
+    return out
 
 
 def record_decision(ctx: ArchitectContext, args: dict) -> dict:
-    evidence = _decision_evidence(ctx, args)
-    if args["kind"] == DecisionKind.DECISION and args.get("affects_elements") and not evidence:
+    claims = _claims(ctx, args.get("claims") or [])
+    if args["kind"] == DecisionKind.DECISION and args.get("affects_elements") and not claims:
         # A design decision stated without anything that shows it is an inference: say so.
-        raise ToolInputError("a decision about model elements needs evidence_ids from your source calls or "
-                             "citations of documents you read; if it rests on reasoning alone, record it with "
-                             "kind \"assumption\" (the decision was not recorded)")
+        raise ToolInputError("a decision about model elements needs at least one claim with evidence that shows "
+                             "it (source evidence of the right kind, or a document for what a value means); if it "
+                             "rests on reasoning alone, record it with kind \"assumption\" (nothing was recorded)")
+    evidence = list({json.dumps(e, sort_keys=True): e for c in claims for e in c["evidence"]}.values())
     data = {"kind": args["kind"], "statement": args["statement"], "rationale": _none_if_empty(args.get("rationale")),
-            "alternatives": [a for a in args.get("alternatives") or [] if a.strip()], "evidence": evidence}
-    ops: list = [CreateOp(type=RecordType.DECISION, ref="d", data=data)]
-    for target in args.get("affects_ids") or []:
-        ops.append(LinkOp(from_id="$d", to_id=_uuid(target), link_type=LinkType.AFFECTS))
-    result = _write(ctx, ops)
-    decision_id = result.created["d"]
-    elements: list[str] = []
-    if args.get("affects_elements"):
+            "alternatives": [a for a in args.get("alternatives") or [] if a.strip()], "evidence": evidence,
+            "claims": claims}
+    revises = _none_if_empty(args.get("revises_id"))
+    links = modeling.list_live_links(ctx.session, ctx.scope)
+    if revises:
+        decision_id = _uuid(revises, "revises_id")
         try:
-            elements = design.link_decision(ctx.candidate, decision_id, args["affects_elements"])
+            view = modeling.get_record(ctx.session, ctx.scope, decision_id)
+        except Exception:
+            raise ToolInputError(f"no decision {revises}; use ids from get_registers") from None
+        if view.type is not RecordType.DECISION:
+            raise ToolInputError(f"{revises} isn't a decision")
+        ops: list = [UpdateOp(id=decision_id, expected_seq=int(args.get("expected_seq") or 0), data=data)]
+        linked = {l.to_id for l in links if l.from_id == decision_id and l.link_type is LinkType.AFFECTS}
+        ref: Any = decision_id
+    else:
+        ops, linked, ref = [CreateOp(type=RecordType.DECISION, ref="d", data=data)], set(), "$d"
+    for target in args.get("affects_ids") or []:
+        if _uuid(target) not in linked:
+            ops.append(LinkOp(from_id=ref, to_id=_uuid(target), link_type=LinkType.AFFECTS))
+    try:
+        result = _write(ctx, ops)
+    except ToolInputError as exc:
+        raise ToolInputError(f"{exc} (the decision was not recorded)") from exc
+    decision_id = decision_id if revises else result.created["d"]
+    elements: list[str] = []
+    already = {e for d in ctx.candidate.content["decision_links"] if d["decision_id"] == str(decision_id)
+               for e in d["elements"]}
+    if new := [e for e in args.get("affects_elements") or [] if design._key(e) not in {design._key(a) for a in already}]:
+        try:
+            elements = design.link_decision(ctx.candidate, decision_id, new)
         except InvalidOperation as exc:
-            raise ToolInputError(f"{exc} (the decision was not recorded)") from exc
-    entry = rt._note_change(ctx, decision_id, "added")
-    return {**entry, "elements": elements, "summary": f"Recorded {entry['code']}: {args['statement'][:80]}"}
+            raise ToolInputError(f"{exc} (the decision was recorded without these element links)") from exc
+    entry = rt._note_change(ctx, decision_id, "updated" if revises else "added")
+    verb = "Revised" if revises else "Recorded"
+    return {**entry, "elements": elements, "summary": f"{verb} {entry['code']}: {args['statement'][:80]}"}
 
 
 def _open_meaning_issues(ctx: ArchitectContext, rid: uuid.UUID) -> list[str]:

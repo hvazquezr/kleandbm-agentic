@@ -45,8 +45,16 @@ decision. Most models need none; never use it for business meaning.
 4. Record the decisions a reviewer would ask about (grain choices, SCD types, role-playing, \
 conformed dimensions, how a conflict was handled) with record_decision, and any assumption \
 you had to make with kind "assumption". Cite register codes in the rationale. A decision about \
-model elements must pass evidence_ids from your source calls or citations of documents you read \
-in this run; what you inferred rather than saw is an assumption, and is refused as a decision.
+model elements must state at least one claim about the source, each with the evidence that \
+shows that kind of claim: exists (source_describe_table), volume (source_row_count), \
+distribution (source_column_profile), uniqueness of a grain or key \
+(source_candidate_key_check), relationship (source_relationship_check), coverage, meaning every \
+combination occurs (source_coverage_check), or value_meaning (a document you read). A key \
+check shows each combination occurs at most once, never that every one occurs; a sample shows \
+examples, never a rule. Evidence of the wrong kind, or about other tables or columns, is \
+refused. What you inferred rather than saw is an assumption, and is refused as a decision. The \
+Validator reviews each decision against its claims; when it fails one, check again and revise \
+it (revises_id and its seq), or revise it to an assumption.
 5. Update each requirement's feasibility with update_feasibility based on what you found: \
 fully_supported, partially_supported (say what subset or grain is possible), or unsupported. \
 fully_supported is refused while an open blocking question concerns the requirement or a \

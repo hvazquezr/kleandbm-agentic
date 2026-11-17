@@ -23,6 +23,7 @@ from app.adapters.sources import SourceConnector
 from app.adapters.storage import ObjectStore
 from app.agents.runtime import Emit, Loop, State, record_usage
 from app.agents.validator.prompt import SYSTEM_PROMPT
+from app.agents.validator import tools as vt
 from app.agents.validator.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ValidatorContext
 from app.domain import design, sources, tenancy
 from app.domain.access import Actor, ActorKind
@@ -44,6 +45,10 @@ def _brief(session: Session, scope, candidate: DesignCandidate, source_ids, roun
         lines.append("Earlier findings to re-check (reuse these issue keys):")
         lines += [f"- {f['issue_key']} [{f['status']}{', blocking' if f.get('is_blocking') else ''}]: {f['summary']}"
                   for f in previous]
+    if decisions := vt.decisions_to_review(session, scope, candidate):
+        lines.append("Design decisions to review, one decision_support finding each (get_candidate has their claims "
+                     "and evidence):")
+        lines += [f"- {d['issue_key']}: {str(d['statement'])[:200]}" for d in decisions]
     if correction:
         lines.append(f"The Architect's account of its correction (a claim to verify, not evidence): {correction[:3000]}")
     lines.append("</review_brief>")

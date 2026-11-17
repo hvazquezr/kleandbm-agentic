@@ -22,7 +22,19 @@ def finding(key, status="passed", *, blocking=False, elements=(), reqs=(), evide
         "question_ids": list(questions), "impact": "", "recommended_action": action}}
 
 
-SUBMIT = {"tool_calls": [{"name": "submit_review", "input": {"summary": "Reviewed."}}]}
+def _checks(snap):
+    """The CHECK records other than the scripted decision_support findings."""
+    return [c for c in snap["checks"] if not (c["data"].get("issue_key") or "").startswith("decision_support:")]
+
+
+def SUBMIT(t):
+    """Finish the round: a non-blocking unverified decision_support finding for each decision the
+    brief lists (submit_review is refused without them), then submit."""
+    import re
+
+    keys = dict.fromkeys(re.findall(r"- (decision_support:\S+):", t[0]["text"]))
+    return {"tool_calls": [*(finding(k, "unverified", kind="assumptions") for k in keys),
+                           {"name": "submit_review", "input": {"summary": "Reviewed."}}]}
 
 
 def fail_round(key="grain:fact_sales", elements=("fact_sales",)):
@@ -64,7 +76,7 @@ def test_a_passing_review_saves_checks_and_marks_ready_for_review(proj, db_sessi
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     assert snap["state"]["effective_state"] == "ready_for_review"
     checks = {c["data"]["issue_key"]: c for c in snap["checks"]}
-    assert set(checks) == {"grain:fact_sales", "coverage:REQ-001"}
+    assert set(checks) == {"grain:fact_sales", "coverage:REQ-001", "decision_support:DEC-001"}
     grain = checks["grain:fact_sales"]["data"]
     assert grain["status"] == "passed" and grain["candidate_id"] == done["candidate"]["id"]
     assert grain["evidence"][0]["kind"] == "source" and grain["evidence"][0]["tool"] == "candidate_key_check"
@@ -84,7 +96,7 @@ def test_a_passing_review_saves_checks_and_marks_ready_for_review(proj, db_sessi
         child = s.scalar(select(AgentRun).where(AgentRun.agent == "validator"))
         assert child.parent_run_id is not None and child.status == "completed" and child.iterations == 5
     reply = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]["text"]
-    assert "2 passed, 0 failed, 0 unverified" in reply and "Ready for Review" in reply
+    assert "2 passed, 0 failed, 1 unverified" in reply and "Ready for Review" in reply
 
 
 def test_a_failed_finding_is_corrected_and_revalidated(proj):
@@ -177,7 +189,7 @@ def test_corrections_stop_at_the_limits_and_escalate(proj):
 
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     assert snap["state"]["effective_state"] == "draft"
-    [check] = snap["checks"]
+    [check] = _checks(snap)
     assert check["data"]["status"] == "failed" and check["data"]["attempts"] == 3
     [question] = [q for q in snap["questions"] if q["data"]["kind"] == "validation_finding"]
     assert "still failing after 3 correction attempts" in question["data"]["description"]
@@ -241,7 +253,7 @@ def test_a_pass_needs_evidence_and_blocking_unverified_keeps_draft(proj):
 
     def capture(t):
         seen["results"] = results(t)
-        return SUBMIT
+        return SUBMIT(t)
 
     validator_steps = [
         {"tool_calls": [finding("grain:fact_sales", elements=["fact_sales"])]},  # passed, no evidence
@@ -260,7 +272,7 @@ def test_a_pass_needs_evidence_and_blocking_unverified_keeps_draft(proj):
     assert done["candidate"]["ready_for_review"] is False
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     assert snap["state"]["effective_state"] == "draft"
-    assert [c["data"]["status"] for c in snap["checks"]] == ["unverified"]
+    assert [c["data"]["status"] for c in _checks(snap)] == ["unverified"]
     assert any("couldn't be verified" in q["data"]["description"] for q in snap["questions"])
 
 
@@ -298,11 +310,11 @@ def test_proposed_candidates_carry_their_review_to_apply(proj):
     done = proj.run()[-1]
     cand = proj.alice.get(f"{proj.base}/candidates/{done['candidate']['id']}").json()
     assert cand["status"] == "proposed" and cand["ready_for_review"] is True
-    assert "1 validation checks (0 not passed)" in cand["diff"]["added"]
+    assert "2 validation checks (1 not passed)"  # with the decision_support finding in cand["diff"]["added"]
     proj.alice.post(f"{proj.base}/candidates/{cand['id']}/apply")
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     assert snap["state"]["effective_state"] == "ready_for_review"
-    assert [c["data"]["issue_key"] for c in snap["checks"]] == ["grain:fact_sales"]
+    assert [c["data"]["issue_key"] for c in _checks(snap)] == ["grain:fact_sales"]
 
 
 def _proposed_reviewed_candidate(proj):
@@ -420,7 +432,7 @@ def test_findings_that_rest_on_an_open_question_link_to_it(proj):
 
     def capture(t):
         seen["results"] = results(t)
-        return SUBMIT
+        return SUBMIT(t)
 
     validator_steps = [
         {"tool_calls": [finding("definition:net_revenue", "unverified", blocking=True, kind="definition_consistency",
@@ -437,7 +449,7 @@ def test_findings_that_rest_on_an_open_question_link_to_it(proj):
 
     snap, raised = _validation_questions(proj)
     assert raised == []  # no duplicate of the open question
-    [check] = snap["checks"]
+    [check] = _checks(snap)
     links = {(l["from_id"], l["to_id"], l["link_type"]) for l in snap["links"]}
     assert (check["id"], q1, "checks") in links
     code = next(q["code"] for q in snap["questions"] if q["id"] == q1)
@@ -452,7 +464,7 @@ def test_a_reworded_finding_on_an_escalated_issue_links_to_its_question(proj):
     proj.run()
     snap, [question] = _validation_questions(proj)
     assert question["data"]["description"].startswith("Validation finding joins:store:")
-    assert (snap["checks"][0]["id"], question["id"], "checks") in {
+    assert (_checks(snap)[0]["id"], question["id"], "checks") in {
         (l["from_id"], l["to_id"], l["link_type"]) for l in snap["links"]}
 
     # Next episode: the same issue, worded differently.
@@ -464,3 +476,60 @@ def test_a_reworded_finding_on_an_escalated_issue_links_to_its_question(proj):
     assert [q["id"] for q in again] == [question["id"]]
     cand = proj.alice.get(f"{proj.base}/candidates/{done['candidate']['id']}").json()
     assert cand["validation"][-1]["findings"][0]["question_ids"] == [question["id"]]
+
+
+BARE_SUBMIT = {"tool_calls": [{"name": "submit_review", "input": {"summary": "Reviewed."}}]}
+
+
+def test_each_design_decision_needs_a_decision_support_finding(proj):
+    seen = {}
+
+    def submit_early(t):
+        seen["candidate"] = json.loads(next(r["content"] for m in t if m["role"] == "tool"
+                                            for r in m["results"] if '"decisions"' in r["content"]))
+        return BARE_SUBMIT
+
+    def review_decision(t):
+        seen["refused"] = results(t)[-1]
+        [d] = seen["candidate"]["decisions"]
+        ids = [e["evidence_id"] for c in d["claims"] for e in c["evidence"]]
+        return {"tool_calls": [finding(d["issue_key"], "passed", kind="assumptions", elements=d["elements"],
+                                       evidence=ids), *BARE_SUBMIT["tool_calls"]]}
+
+    proj.script_agents(_fix_seq(proj, design_steps(proj)), [], [
+        {"tool_calls": [{"name": "get_candidate", "input": {}}, *pass_round()[0]["tool_calls"]]},
+        submit_early, review_decision])
+    done = proj.run()[-1]
+    refused = seen["refused"]
+    assert refused["is_error"] and "decision_support:<code>" in refused["content"] and "DEC-001" in refused["content"]
+
+    [d] = seen["candidate"]["decisions"]  # the Validator sees each claim's evidence and its stored result
+    assert d["issue_key"] == "decision_support:DEC-001" and d["elements"] == ["fact_sales"]
+    [ev] = d["claims"][0]["evidence"]
+    assert ev["tool"] == "describe_table" and ev["arguments"]["table"] == "order_lines" and ev["result"]
+    assert done["candidate"]["ready_for_review"] is True
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    assert {c["data"]["issue_key"]: c["data"]["status"] for c in snap["checks"]}["decision_support:DEC-001"] == "passed"
+
+
+def test_a_failed_decision_goes_back_to_the_architect_who_revises_it(proj):
+    def revise(t):
+        assert "decision_support:DEC-001" in t[-1]["text"]  # the <validator_findings> turn
+        snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+        [d] = snap["decisions"]
+        return {"tool_calls": [{"name": "record_decision", "input": {
+            "kind": "assumption", "statement": "Order-line grain, until a key check confirms it", "rationale": "",
+            "alternatives": [], "affects_ids": [], "affects_elements": ["fact_sales"], "claims": [],
+            "revises_id": d["id"], "expected_seq": d["seq"]}}]}
+
+    failed = finding("decision_support:DEC-001", "failed", blocking=True, kind="assumptions", elements=["fact_sales"],
+                     summary="describe_table shows the columns exist, not the order-line grain",
+                     action="Run a key check, or record it as an assumption")
+    proj.script_agents([*_fix_seq(proj, design_steps(proj)), revise, {"text": "Revised DEC-001."}], [], [
+        {"tool_calls": [*pass_round()[0]["tool_calls"], failed]}, BARE_SUBMIT,
+        {"tool_calls": pass_round()[0]["tool_calls"]}, BARE_SUBMIT])  # an assumption needs no decision finding
+    done = proj.run()[-1]
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    [d] = snap["decisions"]
+    assert d["data"]["kind"] == "assumption" and d["code"] == "DEC-001"
+    assert done["candidate"]["ready_for_review"] is True

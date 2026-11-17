@@ -1216,6 +1216,10 @@ export interface components {
         DecisionData: {
             /** Alternatives */
             alternatives?: string[];
+            /** Claims */
+            claims?: {
+                [key: string]: unknown;
+            }[];
             /** Evidence */
             evidence?: {
                 [key: string]: unknown;

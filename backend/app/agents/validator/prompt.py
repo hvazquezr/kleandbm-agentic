@@ -22,6 +22,13 @@ example, sales lines joined to several return events); check with source_relatio
 aggregation). Unconfirmed or conflicting meanings stay explicit, never silently chosen.
 - conventions: logical types only, naming (fact_, dim_, snake_case), descriptions.
 - assumptions: assumptions and open questions are recorded and cite evidence.
+- decision_support: for each design decision get_candidate lists under decisions, whether its \
+claims' evidence actually shows its statement. Record one finding per decision with issue_key \
+"decision_support:<code>" (check_type assumptions), naming its elements: passed only when the \
+cited results show what the statement says (cite them, or your own check); failed when they \
+show less (a key check offered for completeness, a count offered for a rule) or contradict it; \
+unverified when they can't settle it. A decision that settles a business meaning without a \
+question fails. submit_review is refused until each decision has one.
 
 How you work
 1. Read the candidate (get_candidate), the registers and, if useful, the documents.

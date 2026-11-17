@@ -360,6 +360,50 @@ class Inspector:
             "note": "Observed in current data only; it does not prove a business rule.",
         })
 
+    def coverage_check(self, table: str, columns: list[str], group_by: list[str] | None = None) -> dict[str, Any]:
+        """Whether every combination of `columns` occurs (within each `group_by` group): the
+        distinct combinations present against the full cross product of each column's distinct
+        values in the table. Proves completeness, which a key check can't (a key shows each
+        combination occurs at most once, never that it occurs)."""
+        schema = self._schema()
+        self._table(schema, table)
+        cols = self._columns(schema, table, columns, required=True)
+        groups = self._columns(schema, table, group_by) if group_by else []
+        if set(cols) & set(groups):
+            raise InspectionError("a column can't be both in columns and in group_by")
+        no_null = " AND ".join(f"{_q(c)} IS NOT NULL" for c in cols)
+        distinct = ", ".join(f"COUNT(DISTINCT {_q(c)})" for c in cols)
+        per_column = self._rows(f"SELECT {distinct} FROM {_q(table)} WHERE {no_null}")[0]
+        expected = 1
+        for n in per_column:
+            expected *= int(n)
+        combo = ", ".join(_q(c) for c in cols)
+        if groups:
+            gkey = ", ".join(_q(g) for g in groups)
+            inner = (f"SELECT {gkey}, COUNT(DISTINCT {combo}) AS n FROM {_q(table)} WHERE {no_null} "
+                     f"GROUP BY {gkey}")
+        else:
+            inner = f"SELECT COUNT(DISTINCT {combo}) AS n FROM {_q(table)} WHERE {no_null}"
+        n_groups, complete, least, most = self._rows(
+            f"SELECT COUNT(*), COALESCE(SUM(n = %s), 0), COALESCE(MIN(n), 0), COALESCE(MAX(n), 0) FROM ({inner}) x",
+            (expected,))[0]
+        examples = []
+        if groups:
+            kinds = [self._personal(schema, table, g) for g in groups]
+            for row in self._rows(f"SELECT * FROM ({inner}) x WHERE n < %s ORDER BY n LIMIT 5", (expected,)):
+                examples.append({"group": [mask(_jsonable(v), k) for v, k in zip(row[:-1], kinds)],
+                                 "combinations_present": int(row[-1])})
+        return self._wrap(schema, {
+            "table": table, "columns": cols, "group_by": groups,
+            "distinct_values_per_column": dict(zip(cols, (int(n) for n in per_column))),
+            "combinations_expected_per_group": expected, "groups": int(n_groups), "groups_complete": int(complete),
+            "least_combinations_in_a_group": int(least), "most_combinations_in_a_group": int(most),
+            "is_complete": int(n_groups) > 0 and int(complete) == int(n_groups),
+            "example_incomplete_groups": examples,
+            "masked_columns": self._masked_columns(schema, table, groups),
+            "note": "The universe is the distinct values seen in this table; values that never occur aren't counted.",
+        })
+
     def sample_rows(self, table: str, limit: int = 10, columns: list[str] | None = None) -> dict[str, Any]:
         schema = self._schema()
         self._table(schema, table)

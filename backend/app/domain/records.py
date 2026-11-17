@@ -163,6 +163,17 @@ class DecisionStatus(enum.StrEnum):
     SUPERSEDED = "superseded"
 
 
+class ClaimKind(enum.StrEnum):
+    """What a decision's claim asserts about the source, which fixes the evidence that can show it."""
+    EXISTS = "exists"              # a table or column is there: describe_table (list_tables for tables)
+    VOLUME = "volume"              # how many rows: row_count
+    DISTRIBUTION = "distribution"  # nulls, distinct values, ranges: column_profile
+    UNIQUENESS = "uniqueness"      # a grain or key: candidate_key_check
+    RELATIONSHIP = "relationship"  # a join and its cardinality: relationship_check
+    COVERAGE = "coverage"          # every combination occurs: coverage_check
+    VALUE_MEANING = "value_meaning"  # what a value means for the business: a document
+
+
 class CheckType(enum.StrEnum):
     COVERAGE = "coverage"
     GRAIN = "grain"
@@ -302,6 +313,9 @@ class DecisionData(_Payload):
     # What the decision rests on: [{"kind": "source", "evidence_id", "tool"} | {"kind": "document", "citation"}].
     # An agent's decision about model elements needs some; otherwise it's recorded as an assumption.
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+    # The claims it makes about the source, each with the evidence that shows it:
+    # [{"kind": ClaimKind, "statement", "about": ["table" | "table.column"], "evidence": [...]}].
+    claims: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CheckData(_Payload):

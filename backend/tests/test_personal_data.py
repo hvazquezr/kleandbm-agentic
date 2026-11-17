@@ -128,3 +128,8 @@ def test_northstar_customer_emails_never_leave_the_server():
 
         key = session.call("candidate_key_check", {"table": "customers", "columns": ["email_hash"]}).data
         assert all(k == ["[masked email]"] for d in key["example_duplicates"] for k in [d["key"]])
+
+        cov = session.call("coverage_check", {"table": "customers", "columns": ["signup_date"],
+                                              "group_by": ["email_hash"]}).data
+        assert cov["example_incomplete_groups"] and {"column": "email_hash", "kind": "email"} in cov["masked_columns"]
+        assert all(g["group"] == ["[masked email]"] for g in cov["example_incomplete_groups"])

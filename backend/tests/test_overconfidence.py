@@ -2,6 +2,7 @@
 source_refs must name tables and columns the source tools showed, fully_supported needs sourced
 mappings, and a design run with a linked source must have looked at it. No model judges these."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -232,36 +233,108 @@ def test_a_persons_full_support_is_left_alone_at_finalize(proj):
 def _decision(**extra):
     return {"name": "record_decision", "input": {
         "kind": "decision", "statement": "Order-line grain for sales", "rationale": "", "alternatives": [],
-        "affects_ids": [], "affects_elements": ["fact_sales"], "evidence_ids": [], "citations": [], **extra}}
+        "affects_ids": [], "affects_elements": ["fact_sales"], "claims": [], "revises_id": "", "expected_seq": 0,
+        **extra}}
 
 
-def test_a_decision_about_elements_needs_evidence_or_becomes_an_assumption(proj):
-    from tests.test_architect import evidence_ids
+def _source_id(t):
+    return next(json.loads(r["content"])["sources"][0]["source_id"] for r in _tool_results_raw(t)
+                if not r["is_error"] and '"sources"' in r["content"])
 
+
+def _tool_results_raw(t):
+    return [r for m in t if m["role"] == "tool" for r in m["results"]]
+
+
+def _probe(tool, **args):
+    return lambda t: {"tool_calls": [{"name": f"source_{tool}", "input": {
+        "source_id": _source_id(t), "purpose": "check", **args}}]}
+
+
+def _last_evidence(t, tool):
+    return [json.loads(r["content"])["evidence_id"] for r in _tool_results_raw(t)
+            if not r["is_error"] and f'"tool": "{tool}"' in r["content"]][-1]
+
+
+def _claim_run(proj, *steps):
     seen = {}
 
     def finish(t):
         seen["results"] = _tool_results(t)
         return {"text": "Done."}
-
-    steps = design_steps(proj)
-    proj.script(*steps[:3],
-                {"tool_calls": [_decision()]},                                     # nothing shows it
-                {"tool_calls": [_decision(evidence_ids=["not-an-id"])]},           # not an evidence id
-                {"tool_calls": [_decision(citations=["Board deck v1, slide 3"])]},  # never read
-                {"tool_calls": [_decision(kind="assumption", statement="Returns post in the order month")]},
-                lambda t: {"tool_calls": [_decision(evidence_ids=evidence_ids(t))]},
-                finish)
+    proj.script(*design_steps(proj)[:3], *steps, finish)
     proj.run()
-    results = seen["results"]
-    no_evidence, bad_id, unread, assumption, decision = results[-5:]
-    assert no_evidence["is_error"] and 'kind "assumption"' in no_evidence["content"]
+    return seen["results"]
+
+
+def test_a_decision_about_elements_needs_a_claim_or_becomes_an_assumption(proj):
+    from tests.test_architect import claim, evidence_ids
+
+    results = _claim_run(
+        proj,
+        {"tool_calls": [_decision()]},                                                      # no claim
+        {"tool_calls": [_decision(claims=[claim("exists", "x", ["order_lines"], ["not-an-id"])])]},
+        {"tool_calls": [_decision(claims=[claim("value_meaning", "x", [], citations=["Board deck v1, slide 3"])])]},
+        {"tool_calls": [_decision(claims=[claim("value_meaning", "net_amount is after discounts",
+                                                ["order_lines.net_amount"])])]},              # data can't show meaning
+        {"tool_calls": [_decision(kind="assumption", statement="Returns post in the order month")]},
+        lambda t: {"tool_calls": [_decision(claims=[claim("exists", "order_lines has the line columns",
+                                                          ["order_lines"], evidence_ids(t)[:1])])]})
+    no_claim, bad_id, unread, meaning, assumption, decision = results[-6:]
+    assert no_claim["is_error"] and 'kind "assumption"' in no_claim["content"]
     assert bad_id["is_error"] and "isn't an evidence id" in bad_id["content"]
     assert unread["is_error"] and "no document you read" in unread["content"]
+    assert meaning["is_error"] and "shown by a document, not by the data" in meaning["content"]
     assert not assumption["is_error"] and not decision["is_error"]
 
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     by_kind = {d["data"]["kind"]: d["data"] for d in snap["decisions"]}
-    assert by_kind["assumption"]["evidence"] == []
+    assert by_kind["assumption"]["evidence"] == [] and by_kind["assumption"]["claims"] == []
     [source] = by_kind["decision"]["evidence"]
     assert source["kind"] == "source" and source["tool"] == "describe_table"
+    [c] = by_kind["decision"]["claims"]
+    assert c["kind"] == "exists" and c["about"] == ["order_lines"] and c["evidence"] == [source]
+
+
+def test_evidence_must_be_the_kind_that_shows_the_claim(proj):
+    from tests.test_architect import claim
+
+    coverage = lambda ev: claim("coverage", "every order has every product", ["order_lines.order_id",  # noqa: E731
+                                                                              "order_lines.product_id"], [ev])
+    results = _claim_run(
+        proj,
+        _probe("candidate_key_check", table="order_lines", columns=["order_id", "product_id"]),
+        lambda t: {"tool_calls": [_decision(claims=[coverage(_last_evidence(t, "candidate_key_check"))])]},
+        lambda t: {"tool_calls": [_decision(claims=[claim("exists", "stores is there", ["stores"],
+                                                          [_last_evidence(t, "candidate_key_check")])])]},
+        lambda t: {"tool_calls": [_decision(claims=[claim("uniqueness", "one row per order and product",
+                                                          ["order_lines.order_id", "order_lines.product_id",
+                                                           "order_lines.line_no"],
+                                                          [_last_evidence(t, "candidate_key_check")])])]},
+        _probe("coverage_check", table="order_lines", columns=["product_id"], group_by=["order_id"]),
+        lambda t: {"tool_calls": [_decision(claims=[coverage(_last_evidence(t, "coverage_check"))])]})
+    key_for_coverage, other_table, uniqueness, _probe_result, covered = results[-5:]
+    assert key_for_coverage["is_error"]
+    assert "shows uniqueness, not coverage" in key_for_coverage["content"]
+    assert "source_coverage_check" in key_for_coverage["content"]
+    assert other_table["is_error"] and "isn't about stores" in other_table["content"]
+    assert not uniqueness["is_error"]  # a key on fewer columns makes the larger set unique too
+    assert not covered["is_error"]
+
+
+def test_the_architect_revises_a_decision_in_place(proj):
+    from tests.test_architect import claim, evidence_ids
+
+    def revise(t):
+        snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+        [d] = snap["decisions"]
+        return {"tool_calls": [_decision(kind="assumption", statement="Order-line grain, pending a key check",
+                                         revises_id=d["id"], expected_seq=d["seq"])]}
+    results = _claim_run(
+        proj,
+        lambda t: {"tool_calls": [_decision(claims=[claim("exists", "x", ["order_lines"], evidence_ids(t)[:1])])]},
+        revise)
+    assert not results[-1]["is_error"] and results[-1]["content"]["action"] == "updated"
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    [d] = snap["decisions"]
+    assert d["data"]["kind"] == "assumption" and d["data"]["claims"] == []
