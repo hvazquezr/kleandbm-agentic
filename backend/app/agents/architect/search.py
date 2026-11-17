@@ -268,7 +268,8 @@ def _rank_key(node: SearchNode) -> tuple:
 
 def apply_alternative(parent: Workspace, alt: dict[str, Any], scope: dict[str, Any],
                       requirements: list[modeling.RecordView],
-                      root_tables: set[str] | None = None) -> tuple[Workspace | None, str | None]:
+                      root_tables: set[str] | None = None,
+                      source: "design.SourceSchema | None" = None) -> tuple[Workspace | None, str | None]:
     """The child workspace for one alternative, or the reason it can't be built. Edits outside
     the decision's affected elements are refused: the search is local. Tables the branch added
     at an earlier stage (in the parent but not in the design before the search, `root_tables`)
@@ -306,7 +307,7 @@ def apply_alternative(parent: Workspace, alt: dict[str, Any], scope: dict[str, A
                                    _none_if_empty(m.get("note")), requirements)
     except (InvalidOperation, ValueError, KeyError) as exc:
         return None, f"couldn't be applied: {exc}"
-    ws.internal_checks = design.internal_checks(ws.content, requirements)
+    ws.internal_checks = design.internal_checks(ws.content, requirements, source)
     return ws, None
 
 
@@ -427,7 +428,7 @@ def run_search(ctx: at.ArchitectContext, *, chat_model: ChatModel, trigger: Trig
                               if c.name == "propose_alternatives"), [])
             parent_ws = Workspace(parent.content, parent.internal_checks)
             for alt in proposals[: settings.children]:
-                ws, problem = apply_alternative(parent_ws, alt, scope, requirements, root_tables)
+                ws, problem = apply_alternative(parent_ws, alt, scope, requirements, root_tables, ctx.source_schema())
                 node = SearchNode(
                     tenant_id=dp.tenant_id, project_id=dp.project_id, decision_point_id=dp.id, parent_id=parent.id,
                     depth=state["depth"] + 1, stage=stage, choice=str(alt.get("choice") or "(unnamed)")[:2000],

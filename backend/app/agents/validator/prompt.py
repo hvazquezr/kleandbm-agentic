@@ -36,6 +36,8 @@ the issue_key of each earlier finding and record its new status; don't rename an
 Status and evidence
 - passed only when you have evidence: a source evidence id, a document citation, or an \
 internal check you confirmed. Without evidence the status is unverified, never passed.
+- Cite only documents you read or searched in this review; a citation to a document you haven't \
+opened is refused.
 - failed when the evidence shows a defect. Say what is wrong, its impact, and the smallest \
 correction that would fix it in recommended_action.
 - is_blocking is true when the defect makes the model wrong or misleading for a requirement \

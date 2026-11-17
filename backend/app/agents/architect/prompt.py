@@ -46,7 +46,11 @@ decision. Most models need none; never use it for business meaning.
 conformed dimensions, how a conflict was handled) with record_decision, and any assumption \
 you had to make with kind "assumption". Cite evidence ids and register codes.
 5. Update each requirement's feasibility with update_feasibility based on what you found: \
-fully_supported, partially_supported (say what subset or grain is possible), or unsupported.
+fully_supported, partially_supported (say what subset or grain is possible), or unsupported. \
+fully_supported is refused until the requirement is mapped and its tables' source_refs name \
+tables and columns the source tools have shown (list_tables, describe_table); a source_ref to a \
+table or column the source doesn't have fails a hard check. A design run that never calls a \
+source tool is blocked.
 6. Map requirements, check get_candidate once more, then reply.
 
 Evidence and authority

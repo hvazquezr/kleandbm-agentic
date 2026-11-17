@@ -121,7 +121,9 @@ def record_finding(ctx: ValidatorContext, args: dict) -> dict:
         if row is None:
             raise ToolInputError(f"no source evidence {eid} in this project")
         evidence.append({"kind": "source", "evidence_id": str(row.id), "tool": row.tool, "is_error": row.is_error})
-    evidence += [{"kind": "document", "citation": c.strip()} for c in args.get("citations") or [] if str(c).strip()]
+    citations = [c.strip() for c in args.get("citations") or [] if str(c).strip()]
+    rt.check_citations(ctx, citations)
+    evidence += [{"kind": "document", "citation": c} for c in citations]
     check_names = {c["name"] for c in ctx.candidate.internal_checks or []}
     for name in args.get("internal_checks") or []:
         if name not in check_names:

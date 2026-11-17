@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.persistence.conversations import AgentRun, RunMessage
 from app.persistence.search import DecisionPoint, SearchNode
 from app.persistence.sources import SourceEvidence
-from tests.test_architect import DIM_STORE, FACT_SALES, REL, proj  # noqa: F401
+from tests.test_architect import DIM_STORE, FACT_SALES, REL, design_steps, proj  # noqa: F401
 
 
 def attr(name, role, logical_type="integer", additivity="none"):
@@ -415,7 +415,8 @@ def test_an_unselected_search_asks_a_person_and_their_acceptance_is_logged(proj,
     from app.persistence.models import User
     import pytest
 
-    proj.script_agents(_no_candidate_steps(proj), [], _pass_round())
+    # It looks at the source first: a design made without any source call is blocked on its own.
+    proj.script_agents([*design_steps(proj)[:2], *_no_candidate_steps(proj)], [], _pass_round())
     done = proj.run()[-1]
     assert done["status"] == "completed", done
     cand = proj.alice.get(f"{proj.base}/candidates/{done['candidate']['id']}").json()

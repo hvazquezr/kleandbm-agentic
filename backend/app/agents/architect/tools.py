@@ -14,7 +14,9 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+
+from app.persistence.sources import SourceEvidence
 
 from app.adapters.llm import ChatModel, LLMError, ToolSpec, Usage
 from app.adapters.sources import SourceConnector
@@ -73,6 +75,36 @@ class ArchitectContext(ToolContext):
     def requirements(self) -> list[modeling.RecordView]:
         seq = modeling.current_seq(self.session, self.scope)
         return modeling._latest(self.session, self.scope, RecordType.REQUIREMENT, as_of=seq)
+
+    def source_schema(self) -> "design.SourceSchema | None":
+        """What the source tools have shown of the linked sources' schemas so far."""
+        return design.source_schema(self.session, self.scope, self.source_ids)
+
+    def recheck(self, *, final: bool = False) -> None:
+        """Recompute the candidate's internal checks, source_refs included, after an edit. At
+        review and finalize (`final`), also check that the run looked at its linked sources."""
+        if self.candidate is None:
+            return
+        checks = design.internal_checks(self.candidate.content, self.requirements(), self.source_schema())
+        if final and (check := self.investigation_check()):
+            checks.append(check)
+        self.candidate.internal_checks = checks
+
+    def investigation_check(self) -> dict[str, Any] | None:
+        """Deterministic: a run with linked sources must have called the source tools. A design
+        made without looking at the data is guesswork, whatever its reply says."""
+        if not self.source_ids or self.run is None or not self.candidate.content["tables"]:
+            return None
+        calls = self.session.scalar(select(func.count()).select_from(SourceEvidence).where(
+            SourceEvidence.tenant_id == self.scope.tenant_id, SourceEvidence.project_id == self.scope.project_id,
+            SourceEvidence.connection_id.in_(self.source_ids), SourceEvidence.actor_id == self.run.id,
+            SourceEvidence.is_error.is_(False)))
+        if calls:
+            return {"check_type": "assumptions", "name": "sources_investigated", "status": "passed", "hard": False,
+                    "summary": f"The design run made {calls} successful source tool call(s).", "elements": []}
+        return {"check_type": "assumptions", "name": "sources_investigated", "status": "failed", "hard": True,
+                "summary": "A source is linked to the model, but this run made no successful source tool call, so "
+                           "nothing in the design was checked against the data.", "elements": []}
 
     def open_questions(self) -> list[modeling.RecordView]:
         seq = modeling.current_seq(self.session, self.scope)
@@ -366,6 +398,7 @@ def put_table(ctx: ArchitectContext, args: dict) -> dict:
     table = table_payload(args)
     try:
         entry = design.put_table(ctx.candidate, table, ctx.requirements())
+        ctx.recheck()
     except (InvalidOperation, ValueError) as exc:
         raise ToolInputError(str(exc)) from exc
     return {"table": entry["name"], "attributes": len(entry["attributes"]), "failed_checks": _checks_note(ctx),
@@ -377,6 +410,7 @@ def put_relationships(ctx: ArchitectContext, args: dict) -> dict:
     _guard(ctx, [design._rel_label(r) for r in rels])
     try:
         labels = design.put_relationships(ctx.candidate, rels, ctx.requirements())
+        ctx.recheck()
     except (InvalidOperation, ValueError) as exc:
         raise ToolInputError(str(exc)) from exc
     return {"relationships": labels, "failed_checks": _checks_note(ctx),
@@ -388,8 +422,10 @@ def remove_element(ctx: ArchitectContext, args: dict) -> dict:
     try:
         if args["kind"] == "table":
             design.remove_table(ctx.candidate, args["name"], ctx.requirements())
+            ctx.recheck()
         else:
             design.remove_relationship(ctx.candidate, args["name"], ctx.requirements())
+            ctx.recheck()
     except InvalidOperation as exc:
         raise ToolInputError(str(exc)) from exc
     return {"removed": args["name"], "summary": f"Removed {args['kind']} {args['name']}"}
@@ -400,6 +436,7 @@ def map_requirement(ctx: ArchitectContext, args: dict) -> dict:
     try:
         elements = design.map_requirement(ctx.candidate, rid, args.get("elements") or [],
                                           _none_if_empty(args.get("note")), ctx.requirements())
+        ctx.recheck()
     except InvalidOperation as exc:
         raise ToolInputError(str(exc)) from exc
     code = next((r.code for r in ctx.requirements() if r.id == rid), str(rid))
@@ -427,10 +464,31 @@ def record_decision(ctx: ArchitectContext, args: dict) -> dict:
     return {**entry, "elements": elements, "summary": f"Recorded {entry['code']}: {args['statement'][:80]}"}
 
 
+def _check_full_support(ctx: ArchitectContext, rid: uuid.UUID) -> None:
+    """Deterministic: fully_supported needs the requirement mapped to candidate elements whose
+    tables are verified against the source schema the source tools returned."""
+    mapping = next((m for m in ctx.candidate.content["mappings"] if m["requirement_id"] == str(rid)), None)
+    if not mapping or not mapping["elements"]:
+        raise ToolInputError("map the requirement to the elements that answer it (map_requirement) before marking "
+                             "it fully_supported")
+    ctx.recheck()
+    unverified = {e for c in ctx.candidate.internal_checks or []
+                  if c["name"] in ("source_refs_exist", "source_evidence") and c["status"] != "passed"
+                  for e in c["elements"]}
+    tables = {e.split(".")[0] for e in mapping["elements"]}
+    gaps = sorted(t for t in tables if t in unverified or any(u.startswith(f"{t}.") for u in unverified))
+    if gaps:
+        raise ToolInputError(f"fully_supported needs the mapped tables verified against the source, and these "
+                             f"aren't: {', '.join(gaps)}. Check their source tables and columns with the source "
+                             "tools and cite them in source_ref, or use partially_supported and say what's unverified")
+
+
 def update_feasibility(ctx: ArchitectContext, args: dict) -> dict:
     rid = _uuid(args["requirement_id"], "requirement_id")
     if not any(r.id == rid for r in ctx.requirements()):
         raise ToolInputError("no such requirement; use ids from get_registers")
+    if args["feasibility_status"] == "fully_supported":
+        _check_full_support(ctx, rid)
     _write(ctx, [UpdateOp(id=rid, expected_seq=int(args["expected_seq"]), data={
         "feasibility_status": FeasibilityStatus(args["feasibility_status"]).value,
         "feasibility_notes": _none_if_empty(args.get("feasibility_notes")),

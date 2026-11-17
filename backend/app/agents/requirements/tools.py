@@ -6,6 +6,7 @@ permissions, and the agent-authority guard in apply_changeset all apply. Tool in
 validated again here, because model output is untrusted.
 """
 
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -175,6 +176,41 @@ class ToolContext:
     store: ObjectStore | None = None
     changeset_seqs: list[int] = field(default_factory=list)
     changed: list[dict[str, str]] = field(default_factory=list)  # {"id", "code", "type"}
+    # Titles of the documents whose passages this run read, searched or viewed: citations must
+    # name one of them (check_citations).
+    seen_documents: set[str] = field(default_factory=set)
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _title_key(title: str) -> str:
+    """A title without its extension, letters and digits only: "meridian-ops-notes.md" and
+    "Meridian ops notes" both match it."""
+    stem = title.rsplit(".", 1)[0] if "." in title else title
+    return _norm(stem)
+
+
+def check_citations(ctx: "ToolContext", citations: list[str]) -> None:
+    """Deterministic: every citation names a document whose passages this run actually read,
+    searched or viewed. A citation to a document nobody opened is a claim without evidence."""
+    keys = {k for k in (_title_key(t) for t in ctx.seen_documents) if k}
+    bad = [c for c in citations if not any(k in _norm(c) for k in keys)]
+    if bad:
+        read = ", ".join(sorted(ctx.seen_documents)) or "none yet"
+        raise ToolInputError(f"these citations name no document you read, searched or viewed in this run: {bad} "
+                             f"(documents seen so far: {read}). Read or search the document first; without a "
+                             "source you've seen, leave the citation out and say the point is unverified")
+
+
+def check_documented_origin(ctx: "ToolContext", origin_ref: str) -> None:
+    """Deterministic: a documented definition's origin names a document in this project."""
+    titles = [doc.title for doc, _ in documents.list_documents(ctx.session, ctx.scope)]
+    if not any(k and k in _norm(origin_ref or "") for k in (_title_key(t) for t in titles)):
+        raise ToolInputError(f"origin_ref {origin_ref!r} names no document in this project "
+                             f"({', '.join(titles) or 'there are none'}); a documented definition must cite one "
+                             "of them, otherwise use provenance inferred")
 
 
 def _uuid(value: str, what: str = "id") -> uuid.UUID:
@@ -228,6 +264,7 @@ def read_document(ctx: ToolContext, args: dict) -> dict:
         raise ToolInputError("no such document version in this project") from None
     page = passages[start : start + READ_PAGE]
     doc = documents.get_document(ctx.session, ctx.scope, version.document_id)
+    ctx.seen_documents.add(doc.title)
     return {
         "document": doc.title, "version_no": version.version_no, "total_passages": len(passages),
         "passages": [{"ordinal": p.ordinal, "location": p.location, "text": p.text} for p in page],
@@ -254,6 +291,7 @@ def view_image(ctx: ToolContext, args: dict) -> dict:
     except VisionError as exc:
         raise ToolInputError(str(exc)) from exc
     doc = documents.get_document(ctx.session, ctx.scope, version.document_id)
+    ctx.seen_documents.add(doc.title)
     # The agent loop attaches "__image__" to the tool result as an image the model can see.
     return {
         "__image__": {"media_type": image.media_type, "data": image.data_b64},
@@ -264,6 +302,7 @@ def view_image(ctx: ToolContext, args: dict) -> dict:
 
 def search_documents(ctx: ToolContext, args: dict) -> dict:
     hits = documents.search(ctx.session, ctx.scope, ctx.embedder, args["query"], limit=max(1, min(int(args.get("limit") or 6), 10)))
+    ctx.seen_documents.update(h.document_title for h in hits)
     return {
         "results": [{"document": h.document_title, "version_no": h.version_no, "location": h.location,
                      "score": h.score, "text": h.text} for h in hits],
@@ -304,7 +343,16 @@ def _register_counts(out: dict[str, list]) -> str:
 # --- Write tools ----------------------------------------------------------------------------
 
 
+def _no_full_support_from_documents(status: str | None) -> None:
+    """Deterministic: documents can't show that the data supports a requirement. Only the
+    Architect, with source evidence, may mark one fully supported."""
+    if status == "fully_supported":
+        raise ToolInputError("fully_supported needs source evidence, which only the Architect checks; use "
+                             "partially_supported or not_assessed and say what the documents suggest in feasibility_notes")
+
+
 def record_requirement(ctx: ToolContext, args: dict) -> dict:
+    _no_full_support_from_documents(args.get("feasibility_status"))
     data = {
         "statement": args["statement"], "origin_kind": args["origin_kind"], "origin_ref": args["origin_ref"],
         "feasibility_status": args["feasibility_status"], "feasibility_notes": _none_if_empty(args.get("feasibility_notes")),
@@ -321,6 +369,8 @@ def record_requirement(ctx: ToolContext, args: dict) -> dict:
 
 
 def record_definition(ctx: ToolContext, args: dict) -> dict:
+    if args.get("provenance") == "documented":
+        check_documented_origin(ctx, args.get("origin_ref") or "")
     metric = {k: _none_if_empty(v) for k, v in (args.get("metric") or {}).items()}
     if args["kind"] != "metric" and not any(metric.values()):
         metric = None  # unknown details stay null: explicitly unresolved, never invented
@@ -350,6 +400,7 @@ def update_entry(ctx: ToolContext, args: dict) -> dict:
         changes["status"] = args["question_status"]
     if not changes:
         raise ToolInputError("no fields to change")
+    _no_full_support_from_documents(changes.get("feasibility_status"))
     _write(ctx, [UpdateOp(id=record_id, expected_seq=int(args["expected_seq"]), data=changes)])
     status = changes.get("status")
     action = status if status in ("answered", "deferred", "resolved") else "updated"

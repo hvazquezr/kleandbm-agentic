@@ -23,7 +23,9 @@ the model becomes Ready for Review only when nothing blocks it (`readiness`).
 """
 
 import copy
+import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -53,6 +55,7 @@ from app.persistence.design import CandidateStatus, DesignCandidate
 from app.persistence.models import User
 from app.persistence.modeling import Changeset
 from app.persistence.search import DecisionPoint
+from app.persistence.sources import SourceConnection, SourceEvidence
 
 TABLE_FIELDS = ("name", "kind", "grain", "description", "scd_type")
 ATTRIBUTE_FIELDS = ("name", "logical_type", "role", "is_nullable", "additivity", "description", "ordinal")
@@ -397,8 +400,106 @@ def _check(check_type: str, name: str, status: str, hard: bool, summary: str, el
             "elements": elements or []}
 
 
-def internal_checks(content: dict[str, Any], requirements: list[modeling.RecordView]) -> list[dict[str, Any]]:
-    """The Architect's structural checks. Missing evidence is unverified, never a pass."""
+@dataclass
+class SourceSchema:
+    """What the source tools have shown of the linked sources' schemas, at their current
+    fingerprints: table names (complete when a list_tables call succeeded) and, for tables that
+    were described, their column names."""
+
+    tables: dict[str, set[str] | None] = field(default_factory=dict)  # lower-cased name -> columns or None
+    tables_complete: bool = False
+
+
+def source_schema(session: Session, scope: ProjectScope, connection_ids: list[uuid.UUID]) -> SourceSchema | None:
+    """The schema evidence for these connections, or None if there's none yet."""
+    if not connection_ids:
+        return None
+    fingerprints = {c.id: c.last_schema_fingerprint for c in session.scalars(
+        select(SourceConnection).where(SourceConnection.tenant_id == scope.tenant_id,
+                                       SourceConnection.project_id == scope.project_id,
+                                       SourceConnection.id.in_(connection_ids)))}
+    rows = session.execute(select(SourceEvidence.connection_id, SourceEvidence.tool, SourceEvidence.result,
+                                  SourceEvidence.schema_fingerprint).where(
+        SourceEvidence.tenant_id == scope.tenant_id, SourceEvidence.project_id == scope.project_id,
+        SourceEvidence.connection_id.in_(connection_ids), SourceEvidence.is_error.is_(False),
+        SourceEvidence.tool.in_(("list_tables", "describe_table")))).all()
+    schema, seen = SourceSchema(), False
+    for connection_id, tool, result, fingerprint in rows:
+        if not result or (fingerprints.get(connection_id) and fingerprint != fingerprints[connection_id]):
+            continue  # evidence from an older schema version says nothing about this one
+        seen = True
+        if tool == "list_tables":
+            schema.tables_complete = True
+            for t in result.get("tables") or []:
+                if t.get("table"):
+                    schema.tables.setdefault(str(t["table"]).lower(), None)
+        elif result.get("table"):
+            cols = {str(c.get("name")).lower() for c in result.get("columns") or [] if c.get("name")}
+            name = str(result["table"]).lower()
+            schema.tables[name] = cols or schema.tables.get(name)
+    return schema if seen else None
+
+
+# table.column in a source_ref; a file name like notes.md isn't one.
+_DOTTED = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\.([A-Za-z_][A-Za-z0-9_]+)\b")
+_FILE_EXT = {"md", "txt", "csv", "pdf", "xlsx", "xls", "docx", "doc", "png", "jpg", "jpeg", "json"}
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# A table that isn't loaded from one source table, and says so.
+_DERIVED = re.compile(r"deriv|generat|calculat|calendar|synthetic|static|conformed|junk|n/a|\bnone\b|built from the "
+                      r"(fact|dimension)|from the model", re.I)
+
+
+def _source_ref_check(tables: list[dict[str, Any]], schema: SourceSchema | None) -> list[dict[str, Any]]:
+    """Whether source_refs name what the source actually has. A table or column the source tools
+    showed doesn't exist is a failure (fabricated evidence); one nobody looked at is unverified."""
+    unsourced = [t["name"] for t in tables if not t.get("source_ref")]
+    if schema is None:
+        summary = (f"Tables without cited source evidence: {', '.join(unsourced)}" if unsourced
+                   else "Tables cite source evidence, but no source schema evidence exists to check it against.")
+        return [_check("assumptions", "source_evidence", "unverified", False, summary, unsourced)]
+    model_tables = {_key(t["name"]) for t in tables}
+    missing, unchecked = [], []
+    for t in tables:
+        refs = [(t["name"], t.get("source_ref") or "")] + \
+               [(f"{t['name']}.{a['name']}", a.get("source_ref") or "") for a in t["attributes"]]
+        for element, ref in refs:
+            for tbl, col in _DOTTED.findall(ref):
+                tl, cl = tbl.lower(), col.lower()
+                if cl in _FILE_EXT or _key(tbl) in model_tables:
+                    continue
+                if tl in schema.tables:
+                    cols = schema.tables[tl]
+                    if cols is None:
+                        unchecked.append(element)
+                    elif cl not in cols:
+                        missing.append(f"{element} cites {tbl}.{col}, which {tbl} doesn't have")
+                elif schema.tables_complete:
+                    missing.append(f"{element} cites {tbl}.{col}, but the source has no table {tbl}")
+                else:
+                    unchecked.append(element)
+        ref = t.get("source_ref") or ""
+        if ref and not _DERIVED.search(ref) and not any(w.lower() in schema.tables for w in _WORD.findall(ref)):
+            if schema.tables_complete:
+                missing.append(f"{t['name']} cites {ref!r}, which names no table in the source")
+            else:
+                unchecked.append(t["name"])
+    checks = []
+    if missing:
+        checks.append(_check("assumptions", "source_refs_exist", "failed", True,
+                             "Source references to tables or columns the source doesn't have: " + "; ".join(missing[:12]),
+                             sorted({m.split(" cites ")[0] for m in missing})))
+    gaps = sorted(set(unsourced) | set(unchecked))
+    checks.append(_check("assumptions", "source_evidence", "unverified" if gaps or missing else "passed", False,
+                         f"Not verified against the source schema: {', '.join(gaps)}" if gaps
+                         else ("See source_refs_exist." if missing else
+                               "Every table cites source tables and columns the source tools have shown."), gaps))
+    return checks
+
+
+def internal_checks(content: dict[str, Any], requirements: list[modeling.RecordView],
+                    source: SourceSchema | None = None) -> list[dict[str, Any]]:
+    """The Architect's structural checks. Missing evidence is unverified, never a pass. With
+    `source`, source_refs are checked against the schema the source tools returned."""
     checks: list[dict[str, Any]] = []
     tables = content["tables"]
     facts = [t for t in tables if t["kind"] == "fact"]
@@ -473,10 +574,7 @@ def internal_checks(content: dict[str, Any], requirements: list[modeling.RecordV
                          else ("Every in-scope requirement maps to model elements." if in_scope
                                else "There are no requirements to check coverage against."), unmapped))
 
-    unsourced = [t["name"] for t in tables if not t.get("source_ref")]
-    checks.append(_check("assumptions", "source_evidence", "unverified" if unsourced else "passed", False,
-                         f"Tables without cited source evidence: {', '.join(unsourced)}" if unsourced
-                         else "Every table cites source evidence.", unsourced))
+    checks += _source_ref_check(tables, source)
     return checks
 
 

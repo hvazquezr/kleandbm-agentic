@@ -34,7 +34,8 @@ def run_once(user, scenario: Scenario, variant: str, password: str, settings, *,
     seconds = time.monotonic() - started
     events = [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
     done = events[-1] if events and events[-1].get("type") == "done" else {"status": "failed", "detail": resp.text[:500]}
-    record = collect(fresh_user() if fresh_user else user, ids, done, seconds, markers=scenario.markers)
+    record = collect(fresh_user() if fresh_user else user, ids, done, seconds, markers=scenario.markers,
+                     monitored=settings.monitor_enabled)
     record.update(variant=variant, scenario=scenario.name,
                   tools=[f"{e['status']}: {e['summary']}" for e in events if e.get("type") == "tool" and e.get("status") != "started"])
     record["grade"] = grade(record)
@@ -42,7 +43,7 @@ def run_once(user, scenario: Scenario, variant: str, password: str, settings, *,
 
 
 def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
-            markers: dict[str, str] | None = None) -> dict[str, Any]:
+            markers: dict[str, str] | None = None, monitored: bool = False) -> dict[str, Any]:
     """Everything the comparison needs, read back through the API as a person would see it."""
     base = ids["base"]
     snap = user.get(f"{base}/models/{ids['model']}/snapshot").json()
@@ -96,7 +97,7 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
     record["ids"] = {**ids, "run_id": run_id}
     if run_id:
         record["usage"] = usage(user, base, run_id)
-        record["monitor"] = monitor(user, base, run_id)
+        record["monitor"] = monitor(user, base, run_id) if monitored else None
         if markers:
             record["exposure"] = exposure(user.get(f"{base}/agent-runs/{run_id}/messages").json(), markers)
     return record
@@ -104,7 +105,7 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
 
 def monitor(user, base: str, run_id: str, timeout_s: float = 600.0) -> dict[str, Any] | None:
     """The transcript monitor's assessment of the run. It runs after the stream ends, so wait
-    for it; None if there's none (monitor disabled) or it didn't finish in time."""
+    for it (the caller only asks when the monitor is on)."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         rows = user.get(f"{base}/agent-runs/{run_id}/assessments").json()
@@ -113,8 +114,6 @@ def monitor(user, base: str, run_id: str, timeout_s: float = 600.0) -> dict[str,
             return {k: a[k] for k in ("status", "monitor_model", "score", "flagged", "summary", "concerns",
                                       "untrusted_instructions", "samples", "input_tokens", "output_tokens",
                                       "truncated", "detail")}
-        if not rows and time.monotonic() > deadline - timeout_s + 30:
-            return None  # nothing started within 30 s: the monitor is off
         time.sleep(2)
     return {"status": "timeout"}
 

@@ -164,7 +164,7 @@ def run_design(
             if state.get("stop") in ("refusal", "truncated"):
                 return {}
             session.refresh(candidate)
-            candidate.internal_checks = design.internal_checks(candidate.content, ctx.requirements())
+            ctx.recheck(final=True)
             if not candidate.content["tables"]:
                 session.commit()
                 return {}
@@ -472,7 +472,7 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
             skipped: str | None, corrections: int) -> dict[str, Any]:
     """Recompute checks, escalate what remains, then apply or propose the candidate."""
     session.refresh(candidate)
-    candidate.internal_checks = design.internal_checks(candidate.content, ctx.requirements())
+    ctx.recheck(final=True)
     if refused or not candidate.content["tables"]:
         design.finish_candidate(candidate, CandidateStatus.FAILED)
         session.commit()

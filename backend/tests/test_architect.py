@@ -363,7 +363,19 @@ def _tool_results(transcript) -> list[dict]:
     return out
 
 
+GLOSSARY = b"""# Finance glossary
+
+Net revenue is gross sales less discounts and refunds, reported in the month of the order.
+"""
+
+
+def _upload_glossary(p) -> None:
+    r = p.alice.post(f"{p.base}/documents", files={"file": ("finance-glossary.md", GLOSSARY, "text/markdown")})
+    assert r.status_code == 201, r.text
+
+
 def test_architect_consults_requirements_and_gets_a_documented_answer(proj, db_session_factory):
+    _upload_glossary(proj)
     seen = {}
 
     def capture(t):
@@ -373,6 +385,7 @@ def test_architect_consults_requirements_and_gets_a_documented_answer(proj, db_s
     architect, requirements, _ = proj.script_agents(
         [{"tool_calls": [_ask(proj)]}, capture],
         [{"tool_calls": [{"name": "get_registers", "input": {}}]},
+         {"tool_calls": [{"name": "search_documents", "input": {"query": "net revenue", "limit": 3}}]},
          {"tool_calls": [{"name": "record_definition", "input": NET_REVENUE}]},
          lambda t: {"tool_calls": [{"name": "answer_architect", "input": {
              "outcome": "answered_from_evidence", "answer": "Net revenue is gross less discounts and refunds.",
@@ -398,7 +411,7 @@ def test_architect_consults_requirements_and_gets_a_documented_answer(proj, db_s
     with db_session_factory() as s:
         child = s.scalar(select(AgentRun).where(AgentRun.parent_run_id.is_not(None)))
         assert child.agent == "business_requirements" and child.status == "completed"
-        assert child.iterations == 3 and child.input_tokens == 300
+        assert child.iterations == 4 and child.input_tokens == 400  # registers, search, record, answer
         # The definition is attributed to the consultation run, on behalf of the user.
         cs = s.scalar(select(Changeset).where(Changeset.seq == child.changeset_seqs[0]))
         assert cs.actor_kind == ActorKind.AGENT and cs.actor_id == child.id
@@ -410,6 +423,7 @@ def test_architect_consults_requirements_and_gets_a_documented_answer(proj, db_s
 
 def test_consultations_are_bounded_and_cannot_fake_authority(proj, monkeypatch):
     monkeypatch.setattr(get_settings(), "architect_max_consultations", 2)
+    _upload_glossary(proj)
     seen = {}
 
     def finish(t):
