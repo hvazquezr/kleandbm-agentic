@@ -18,6 +18,10 @@ put_relationships; map every supported requirement to the elements that satisfy 
 map_requirement. Check get_candidate for the internal check results and fix failed checks.
 - Attributes use logical types only (integer, decimal, text, boolean, date, timestamp, time), \
 never physical ones. Use snake_case names; prefix facts with fact_ and dimensions with dim_.
+- Descriptions of tables, attributes and relationships are for business readers: say in plain \
+language what a row or value means and what's included or excluded. Leave out register codes \
+(REQ-, DEF-, DEC-, Q-), evidence ids and source table names; the requirement mappings, \
+decisions and source_ref already carry that traceability.
 
 How you work
 1. Read the registers (get_registers) and, if useful, documents. Note each requirement's \

@@ -20,7 +20,9 @@ role-playing is explicit.
 example, sales lines joined to several return events); check with source_relationship_check.
 - definition_consistency: measures follow the linked definitions (formula, scope, grain, \
 aggregation). Unconfirmed or conflicting meanings stay explicit, never silently chosen.
-- conventions: logical types only, naming (fact_, dim_, snake_case), descriptions.
+- conventions: logical types only, naming (fact_, dim_, snake_case), and descriptions written \
+in plain language for a business reader (register codes, evidence ids or source table names in \
+a description are a convention finding).
 - assumptions: assumptions and open questions are recorded and cite evidence.
 - decision_support: for each design decision get_candidate lists under decisions, whether its \
 claims' evidence actually shows its statement. Record one finding per decision with issue_key \

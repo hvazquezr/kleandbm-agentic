@@ -127,7 +127,7 @@ _ATTRIBUTE = _obj({
     "is_nullable": {"type": "boolean"},
     "additivity": {"type": "string", "enum": ["additive", "semi_additive", "non_additive", "none"],
                    "description": "For measures; 'none' otherwise."},
-    "description": _opt("What the attribute means."),
+    "description": _opt("What the attribute means. Plain language for a business reader; no register codes, evidence ids or source names."),
     "source_ref": _opt("Source table.column it comes from, or the evidence id."),
 })
 
@@ -138,7 +138,7 @@ _RELATIONSHIP = _obj({
     "to_attribute": {"type": "string", "description": "The referenced key"},
     "cardinality": _enum(Cardinality),
     "role_name": _opt("Role for role-playing dimensions, e.g. 'order date'."),
-    "description": _opt("What the relationship means."),
+    "description": _opt("What the relationship means. Plain language for a business reader; no register codes, evidence ids or source names."),
 })
 
 _CLAIM = _obj({
@@ -196,7 +196,8 @@ CANDIDATE_TOOL_SPECS = [
                  "previous_name": _opt("Current name when renaming."),
                  "kind": _enum(TableKind),
                  "grain": _opt("For facts: exactly what one row represents."),
-                 "description": _opt("What the table is for."),
+                 "description": _opt("What one row holds and what the table is for, including what it leaves out."
+                              " Plain language for a business reader; no register codes, evidence ids or source names."),
                  "scd_type": _enum(ScdType),
                  "source_ref": _opt("Source tables it is built from and the evidence ids that support it."),
                  "attributes": {"type": "array", "items": _ATTRIBUTE},
