@@ -42,6 +42,7 @@ from app.agents.architect.tools import (
     TOOL_SPECS,
     WRITE_TOOLS,
     ArchitectContext,
+    _open_meaning_issues,
 )
 from app.agents.requirements.agent import _history
 from app.adapters import tracing
@@ -49,11 +50,11 @@ from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_
 from app.agents.validator.agent import review as validator_review
 from app.domain import design, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
-from app.domain.modeling import CreateOp, LinkOp
-from app.domain.records import CheckStatus, LinkType, RecordType
+from app.domain.modeling import CreateOp, LinkOp, UpdateOp
+from app.domain.records import CheckStatus, FeasibilityStatus, LinkType, RecordType
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 from app.persistence.design import CandidateStatus, DesignCandidate
-from app.persistence.modeling import DataModel
+from app.persistence.modeling import Changeset, DataModel
 from app.persistence.models import Project
 from app.persistence.search import DecisionPoint, SearchNode
 
@@ -438,6 +439,50 @@ def _raise_decision_questions(session: Session, scope, ctx: ArchitectContext, ca
     return raised
 
 
+def _withdraw_unsettled_support(session: Session, scope, ctx: ArchitectContext,
+                                candidate: DesignCandidate) -> list[str]:
+    """Deterministic, after escalation: full support set during the run can't outlive a blocking
+    question raised later (a Validator finding escalated at finalize, say). A requirement this
+    design maps, marked fully_supported by an agent, goes back to partially_supported when an open
+    blocking question now concerns it, a definition it uses, or an element it maps to, or when it's
+    in an unresolved conflict. A person's own feasibility call is left alone. Returns the codes."""
+    existing = design.element_record_ids(candidate.content)
+    mapped = {m["requirement_id"]: m["elements"] for m in candidate.content.get("mappings", [])}
+    requirements = [r for r in ctx.requirements() if str(r.id) in mapped
+                    and r.data.get("feasibility_status") == FeasibilityStatus.FULLY_SUPPORTED.value]
+    if not requirements:
+        return []
+    by_people = set(session.scalars(select(Changeset.seq).where(
+        Changeset.project_id == scope.project_id, Changeset.seq.in_([r.seq for r in requirements]),
+        Changeset.actor_kind == ActorKind.USER)))
+    links = modeling.list_live_links(session, scope)
+    blocking = [q for q in ctx.open_questions() if q.data.get("is_blocking")]
+    withdrawn: list[str] = []
+    for req in requirements:
+        if req.seq in by_people:
+            continue
+        issues = _open_meaning_issues(ctx, req.id)
+        keys = {design._key(e) for e in mapped[str(req.id)]}
+        elements = {existing[k] for k in keys | {k.split(".")[0] for k in keys} if k in existing}
+        issues += [f"{q.code} is open and blocking about a mapped element" for q in blocking
+                   if any(l.link_type is LinkType.CONCERNS and l.from_id == q.id and l.to_id in elements
+                          for l in links)
+                   and f"{q.code} is open and blocking" not in issues]
+        if not issues:
+            continue
+        notes = (req.data.get("feasibility_notes") or "").strip()
+        note = ("Full support withdrawn when the design was finalized, because the meaning is still open: "
+                f"{'; '.join(dict.fromkeys(issues))}. A person settles it.")
+        result = modeling.apply_changeset(session, scope, [UpdateOp(id=req.id, expected_seq=req.seq, data={
+            "feasibility_status": FeasibilityStatus.PARTIALLY_SUPPORTED.value,
+            "feasibility_notes": f"{notes}\n\n{note}".strip()[:4000]})],
+            reason=f"{ctx.reason}: full support withdrawn while questions are open")
+        ctx.changeset_seqs.append(result.seq)
+        ctx.changed.append({"id": str(req.id), "code": req.code or "", "type": "requirement"})
+        withdrawn.append(req.code or str(req.id))
+    return withdrawn
+
+
 def _validation_note(candidate: DesignCandidate, skipped: str | None, corrections: int,
                      escalated: dict[str, list[str]]) -> str:
     if skipped:
@@ -462,9 +507,13 @@ def _validation_note(candidate: DesignCandidate, skipped: str | None, correction
 
 
 def _search_note(escalated: dict[str, list[str]]) -> str:
+    note = ""
+    if escalated.get("withdrawn"):
+        note = (f" _{', '.join(escalated['withdrawn'])} went back to partially supported: a blocking question "
+                "or conflict about it is still open._")
     if not escalated.get("searches"):
-        return ""
-    return (f" _A decision-point search ended without a selected design, so {', '.join(escalated['searches'])} "
+        return note
+    return note + (f" _A decision-point search ended without a selected design, so {', '.join(escalated['searches'])} "
             "asks you to accept or reject the design as it stands._")
 
 
@@ -481,6 +530,7 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
     # Escalate before applying: a register change after the readiness event would reset it to Draft.
     escalated = _escalate(session, scope, ctx, candidate)
     escalated["searches"] = _raise_decision_questions(session, scope, ctx, candidate)
+    escalated["withdrawn"] = _withdraw_unsettled_support(session, scope, ctx, candidate)
     # The watermark the review and escalations describe; register changes after it make the
     # review out of date (design.review_outdated).
     candidate.proposed_seq = modeling.current_seq(session, scope)

@@ -151,7 +151,7 @@ def _registers(p, *ops):
     return r.json()["created"]
 
 
-def _gate_run(proj):
+def _gate_run(proj, *after):
     """Design with dim_store described as well, map revenue, then try fully_supported."""
     seen = {}
 
@@ -167,7 +167,7 @@ def _gate_run(proj):
     proj.script(*steps[:2], describe_stores, steps[2],
                 {"tool_calls": [{"name": "map_requirement", "input": {"requirement_id": proj.revenue_req,
                                                                       "elements": ["dim_store"], "note": ""}}]},
-                {"tool_calls": [_feasibility(proj)]}, finish)
+                {"tool_calls": [_feasibility(proj)]}, *after, finish)
     proj.run()
     return [r for r in seen["results"] if r["is_error"]]
 
@@ -193,6 +193,40 @@ def test_a_conflicting_definition_keeps_a_requirement_from_full_support(proj):
 
 def test_without_open_meaning_and_with_verified_tables_full_support_is_allowed(proj):
     assert _gate_run(proj) == []  # dim_store's source table was described; nothing is open
+
+
+def _requirement(proj):
+    snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
+    return next(r for r in snap["requirements"] if r["id"] == proj.revenue_req)
+
+
+def test_a_blocking_question_raised_after_full_support_withdraws_it_at_finalize(proj):
+    late = {"tool_calls": [{"name": "raise_question", "input": {
+        "kind": "clarification", "description": "Do months follow the fiscal calendar?", "impact": "",
+        "is_blocking": True, "proposed_action": "", "concerns_ids": [proj.revenue_req]}}]}
+    assert _gate_run(proj, late) == []  # full support was allowed when it was set
+    req = _requirement(proj)
+    assert req["data"]["feasibility_status"] == "partially_supported"
+    assert "withdrawn when the design was finalized" in req["data"]["feasibility_notes"]
+    assert "is open and blocking" in req["data"]["feasibility_notes"]
+
+
+def test_without_a_late_question_full_support_stays(proj):
+    _gate_run(proj)
+    assert _requirement(proj)["data"]["feasibility_status"] == "fully_supported"
+
+
+def test_a_persons_full_support_is_left_alone_at_finalize(proj):
+    from tests.test_architect import _seq_of
+
+    def person_marks_it(t):  # between the agent's turns, a person sets feasibility themself
+        _registers(proj, {"op": "update", "id": proj.revenue_req, "expected_seq": _seq_of(proj, proj.revenue_req),
+                          "data": {"feasibility_status": "fully_supported", "feasibility_notes": "I checked it"}})
+        return {"tool_calls": [{"name": "raise_question", "input": {
+            "kind": "clarification", "description": "Fiscal months?", "impact": "", "is_blocking": True,
+            "proposed_action": "", "concerns_ids": [proj.revenue_req]}}]}
+    _gate_run(proj, person_marks_it)
+    assert _requirement(proj)["data"]["feasibility_status"] == "fully_supported"
 
 
 def _decision(**extra):
