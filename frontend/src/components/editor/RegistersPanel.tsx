@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react";
+import { Check, MessageSquareReply, X } from "lucide-react";
 import { useMemo } from "react";
 import type { Operation, Snapshot } from "@/api/client";
 import { CheckLine, RefChip } from "@/components/design/ElementTrace";
@@ -71,10 +71,13 @@ function Item({
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
 
-/** Confirm or reject a meaning. Only people with approval rights get these; agents never can. */
-function Decide({ id, seq, code, write }: { id: string; seq: number; code: string | null; write: Write }) {
+/** Confirm or reject an entry. Meanings need approval rights and decisions need edit rights (the
+ *  server enforces both); agents never can. */
+function Decide({ id, seq, code, write, field = "confirmation_status" }: {
+  id: string; seq: number; code: string | null; write: Write; field?: "confirmation_status" | "status";
+}) {
   const decide = (status: "confirmed" | "rejected") =>
-    write([{ op: "update", id, expected_seq: seq, data: { confirmation_status: status } }],
+    write([{ op: "update", id, expected_seq: seq, data: { [field]: status } }],
       { success: `${code} ${status}`, reason: `${status === "confirmed" ? "Confirmed" : "Rejected"} by a person` });
   return (
     <>
@@ -93,10 +96,16 @@ export function RegistersPanel({
   write,
   only,
   onOpenReview,
+  canEdit = false,
+  onAnswer,
 }: {
   snapshot: Snapshot;
   onSelectRecord: (id: string) => void;
   canApprove?: boolean;
+  /** Editors confirm or reject design decisions and answer questions. */
+  canEdit?: boolean;
+  /** Answer an open question through the Requirements agent. */
+  onAnswer?: (question: { id: string; code: string | null }) => void;
   write?: Write;
   /** Show one register instead of all of them. */
   only?: RegisterKey;
@@ -154,7 +163,11 @@ export function RegistersPanel({
       <Section title="Questions & conflicts" count={snapshot.questions.length}>
         {snapshot.questions.map((q) => (
           <Item key={q.id} code={q.code} onClick={() => onSelectRecord(q.id)}
-            actions={q.data.kind === "decision_point" && q.data.status === "open" ? (
+            actions={q.data.kind !== "decision_point" && q.data.status === "open" && canEdit && onAnswer ? (
+              <Button size="sm" variant="outline" className="h-7" onClick={() => onAnswer({ id: q.id, code: q.code })}>
+                <MessageSquareReply className="size-3.5" /> Answer
+              </Button>
+            ) : q.data.kind === "decision_point" && q.data.status === "open" ? (
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>Settled on the Review tab, by accepting or rejecting the design the search left. Answering it here or in chat doesn't clear the blocker.</span>
                 {onOpenReview && (
@@ -176,7 +189,9 @@ export function RegistersPanel({
       {show("decisions") && (
       <Section title="Decisions & assumptions" count={snapshot.decisions.length}>
         {snapshot.decisions.map((d) => (
-          <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)}>
+          <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)}
+            actions={canEdit && write && d.data.status === "proposed"
+              ? <Decide id={d.id} seq={d.seq} code={d.code} write={write} field="status" /> : undefined}>
             <div>{d.data.statement}</div>
             {d.data.rationale && <div className="text-muted-foreground text-xs">{d.data.rationale}</div>}
             <div className="flex flex-wrap gap-1.5">

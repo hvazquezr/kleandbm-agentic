@@ -116,6 +116,7 @@ export function AssistantPanel({
   onSelectRecord,
   onCandidate,
   draft,
+  draftKey = 0,
   startDraft = 0,
   agent = "business_requirements",
   canViewRuns = false,
@@ -130,6 +131,8 @@ export function AssistantPanel({
   onCandidate?: (candidateId: string) => void;
   /** Prefills the composer (e.g. from the wizard's context step). */
   draft?: string;
+  /** Changes each time `draft` should be put in the composer again (and focused), even if it's the same text. */
+  draftKey?: number;
   /** Architect only: each new value starts a "design a draft model" run, unless one is running. */
   startDraft?: number;
   agent?: AgentName;
@@ -162,11 +165,18 @@ export function AssistantPanel({
   // already shown as pending, so it's hidden from the history until the run ends.
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (draft) setText(draft);
-  }, [draft]);
+    if (!draft) return;
+    setText(draft);
+    if (draftKey) requestAnimationFrame(() => {
+      const el = composer.current;
+      el?.focus();
+      el?.setSelectionRange(draft.length, draft.length);
+    });
+  }, [draft, draftKey]);
   // Start a requested draft once the conversation list is in, so the run reuses the existing
   // Architect conversation instead of creating another.
   const startedDraft = useRef(0);
@@ -327,6 +337,7 @@ export function AssistantPanel({
             </div>
           )}
           <Textarea
+            ref={composer}
             rows={3}
             value={text}
             disabled={running}

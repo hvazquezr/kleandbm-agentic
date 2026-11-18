@@ -461,3 +461,34 @@ def test_agent_changesets_are_attributed_to_agent_and_initiating_user(proj, db_s
     assert history[0]["actor_kind"] == "agent"
     assert history[0]["actor_id"] == str(agent_id)
     assert history[0]["on_behalf_of"] == str(proj.alice.id)
+
+
+def test_confirming_meanings_needs_approval_rights_and_decisions_need_edit(proj, as_user):
+    """Business meanings (requirements, definitions) are confirmed or rejected only by people with
+    approval rights; editors may confirm or reject design decisions. The UI hiding the buttons
+    isn't the control: the server refuses."""
+    created = proj.cs(proj.alice, [
+        {"op": "create", "type": "definition", "ref": "d", "data": {"term": "Net sales", "kind": "metric", "provenance": "user_stated"}},
+        {"op": "create", "type": "decision", "ref": "x", "data": {"kind": "decision", "statement": "Order-line grain"}},
+    ]).json()["created"]
+    erin = as_user("auth0|erin")
+    proj.alice.put(f"/tenants/{proj.tenant}/members/{erin.id}", json={"role": "member"})
+    proj.alice.put(f"{proj.base}/members/{erin.id}", json={"role": "editor"})
+    seq = lambda rid: next(r["seq"] for k in ("definitions", "decisions") for r in proj.snap()[k] if r["id"] == rid)  # noqa: E731
+
+    confirm_def = lambda user, status: proj.cs(user, [  # noqa: E731
+        {"op": "update", "id": created["d"], "expected_seq": seq(created["d"]), "data": {"confirmation_status": status}}])
+    assert confirm_def(erin, "confirmed").status_code == 403
+    assert proj.cs(erin, [{"op": "create", "type": "definition", "data": {
+        "term": "Gross sales", "kind": "metric", "provenance": "user_stated", "confirmation_status": "confirmed"}}]).status_code == 403
+    assert confirm_def(proj.alice, "confirmed").status_code == 201  # the owner holds approval rights
+    assert confirm_def(erin, "unconfirmed").status_code == 403      # nor can an editor undo it
+    # Other edits by an editor are unaffected.
+    assert proj.cs(erin, [{"op": "update", "id": created["d"], "expected_seq": seq(created["d"]),
+                           "data": {"aliases": ["NS"]}}]).status_code == 201
+
+    decide = lambda status: proj.cs(erin, [  # noqa: E731
+        {"op": "update", "id": created["x"], "expected_seq": seq(created["x"]), "data": {"status": status}}])
+    assert decide("rejected").status_code == 201 and decide("confirmed").status_code == 201
+    decision = next(d for d in proj.snap()["decisions"] if d["id"] == created["x"])
+    assert decision["data"]["status"] == "confirmed"

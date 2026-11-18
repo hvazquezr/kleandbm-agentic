@@ -645,6 +645,18 @@ class _ChangesetWriter:
         if old == "confirmed" and any(current.get(k) != data.get(k) for k in set(current) | set(data) if k not in exempt):
             raise InvalidOperation("this entry was confirmed by a person; raise a question instead of changing it")
 
+    # Business meanings (requirements, definitions) are confirmed or rejected only by people with
+    # approval rights (spec §7); design decisions are technical choices, so editors may settle them.
+    _APPROVAL_TYPES = {RecordType.REQUIREMENT, RecordType.DEFINITION}
+
+    def _guard_person_authority(self, rtype: RecordType, current: dict[str, Any] | None, data: dict[str, Any]) -> None:
+        if self.scope.actor.kind is not ActorKind.USER or rtype not in self._APPROVAL_TYPES:
+            return
+        name = self._AUTHORITY_FIELDS[rtype]
+        new, old = str(data.get(name)), (str(current.get(name)) if current else None)
+        if new != old and (new in self._HUMAN_ONLY_VALUES or old in self._HUMAN_ONLY_VALUES):
+            self.scope.require(Permission.PROJECT_APPROVE)
+
     def _create(self, op: CreateOp) -> None:
         if op.ref is not None and op.ref in self.refs:
             raise InvalidOperation(f"duplicate ref {op.ref}")
@@ -653,6 +665,7 @@ class _ChangesetWriter:
         payload = PAYLOADS[op.type].model_validate(raw)
         data = payload.model_dump(mode="python")
         self._guard_agent_authority(op.type, None, data)
+        self._guard_person_authority(op.type, None, data)
         self._check_references(op.type, data)
         record = Record(
             tenant_id=self.scope.tenant_id,
@@ -680,6 +693,7 @@ class _ChangesetWriter:
         merged = {**current, **patch.model_dump(mode="python", exclude_unset=True)}
         data = PAYLOADS[record.record_type].model_validate(merged).model_dump(mode="python")
         self._guard_agent_authority(record.record_type, current, data)
+        self._guard_person_authority(record.record_type, current, data)
         self._guard_decision_point(record, current, data, created_here)
         self._check_references(record.record_type, data)
         self._write_revision(record, data, deleted=False, created_here=created_here)

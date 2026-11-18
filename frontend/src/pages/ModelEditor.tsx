@@ -72,6 +72,8 @@ export default function ModelEditor() {
   // Bumped to start an Architect draft run in the (always mounted) Architect panel.
   const [draftRequest, setDraftRequest] = useState(0);
   const [runFocus, setRunFocus] = useState<RunFocus | null>(null);
+  // "Answer" on a question: prefill the Requirements chat (n repeats it for the same question).
+  const [answering, setAnswering] = useState<{ text: string; n: number } | null>(null);
   const linkedSources = useModelSources(path, modelId);
 
   const role = project.data?.role;
@@ -358,6 +360,8 @@ export default function ModelEditor() {
               canEdit={canEdit && viewingSeq === undefined}
               className={agent === a ? "flex-1" : "hidden"}
               startDraft={a === "architect" ? draftRequest : 0}
+              draft={a === "business_requirements" ? answering?.text : undefined}
+              draftKey={a === "business_requirements" ? answering?.n : undefined}
               onSelectRecord={selectRecord}
               onCandidate={onCandidate}
               canViewRuns={canEdit}
@@ -454,6 +458,13 @@ export default function ModelEditor() {
         write={write}
         onSelectRecord={selectRecord}
         onOpenReview={() => { setRegistersOpen(null); setDrawer("review"); }}
+        canEdit={canEdit && viewingSeq === undefined}
+        onAnswer={(q) => {
+          setRegistersOpen(null);
+          setAgent("business_requirements");
+          setDrawer("assistant");
+          setAnswering((prev) => ({ text: `Answer to ${q.code ?? "the question"}: `, n: (prev?.n ?? 0) + 1 }));
+        }}
       />
 
       <Dialog open={sourcesOpen} onOpenChange={setSourcesOpen}>
@@ -541,7 +552,7 @@ const REGISTERS: { key: RegisterKey; label: string; count: (s: Snapshot) => numb
   { key: "checks", label: "Checks", count: (s) => s.checks.length },
 ];
 
-function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSelectRecord, onOpenReview }: {
+function RegistersDialog({ open, onOpenChange, snapshot, canApprove, canEdit, write, onSelectRecord, onOpenReview, onAnswer }: {
   open: RegisterKey | null;
   onOpenChange: (v: RegisterKey | null) => void;
   snapshot: Snapshot;
@@ -549,6 +560,8 @@ function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSe
   write: ReturnType<typeof useWrite>["write"];
   onSelectRecord: (id: string) => void;
   onOpenReview: () => void;
+  canEdit: boolean;
+  onAnswer: (question: { id: string; code: string | null }) => void;
 }) {
   return (
     <Dialog open={open !== null} onOpenChange={(o) => !o && onOpenChange(null)}>
@@ -567,7 +580,7 @@ function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSe
           </TabsList>
           <div className="flex-1 min-h-0 overflow-y-auto pr-2 mt-3">
             {open && <RegistersPanel only={open} snapshot={snapshot} canApprove={canApprove} write={write} onSelectRecord={onSelectRecord}
-              onOpenReview={onOpenReview} />}
+              onOpenReview={onOpenReview} canEdit={canEdit} onAnswer={onAnswer} />}
           </div>
         </Tabs>
       </DialogContent>
