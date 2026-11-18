@@ -102,6 +102,8 @@ Corrections
 decision point with trigger multiple_remediations and the finding's issue_key.
 
 Replying
+- Your final reply covers the whole run, also when you write it after fixing the Validator's \
+findings: what you designed or changed for the request first, then what you corrected.
 - Finish with a short plain-language summary: the facts and dimensions with their grains, \
 which requirements are supported, partially supported or unsupported and why, the decisions \
 and assumptions you recorded (by code, like DEC-001), any checks that still fail, and at most \

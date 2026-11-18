@@ -196,6 +196,7 @@ def test_architect_designs_and_applies_to_an_empty_model(proj, db_session_factor
         assert ev.actor_kind == ActorKind.AGENT and ev.purpose == "grain"
     reply = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]["text"]
     assert "Applied to the model as changeset" in reply
+    assert "**What this run changed:**" in reply and "- Added in the model: dimension dim_store, fact fact_sales" in reply
 
 
 def test_partial_draft_with_failed_hard_checks_is_applied_but_flagged(proj):
@@ -230,6 +231,14 @@ def test_non_empty_model_gets_a_proposal_the_user_applies(proj):
     assert not cand["stale"]
     assert "fact fact_sales" in cand["diff"]["added"] and "table dim_store" in cand["diff"]["changed"]
     assert "attribute dim_store.store_key" in cand["diff"]["added"]
+    # The reply lists what the whole run changed (from the diff and the register entries it wrote,
+    # not from the model's last turn) and says plainly that nothing is applied until Review.
+    reply = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()[-1]["text"]
+    assert "**What this run changed:**" in reply
+    assert "- Added in the model (once applied): fact fact_sales" in reply and "attribute dim_store.store_key" in reply
+    assert "- Changed in the model (once applied): table dim_store" in reply
+    assert "- Registers: added DEC-001" in reply
+    assert "**Not applied yet.**" in reply and "open **Review**" in reply
 
     applied = proj.alice.post(f"{proj.base}/candidates/{cand['id']}/apply").json()
     assert applied["status"] == "applied" and applied["diff"] is None

@@ -240,7 +240,8 @@ def run_design(
 
         def finalize(state: State) -> dict:
             outcome.update(_settle(session, scope, ctx, candidate, refused=state.get("stop") == "refusal",
-                                   skipped=episode["skipped"], corrections=episode["corrections"]))
+                                   skipped=episode["skipped"], corrections=episode["corrections"],
+                                   activity=loop.activity))
             return {}
 
         graph = StateGraph(State)
@@ -517,8 +518,38 @@ def _search_note(escalated: dict[str, list[str]]) -> str:
             "asks you to accept or reject the design as it stands._")
 
 
+def _listed(items: list[str], limit: int = 12) -> str:
+    shown = ", ".join(items[:limit])
+    return shown + (f" and {len(items) - limit} more" if len(items) > limit else "")
+
+
+def _changes_note(diff: dict[str, list[str]], activity: list[dict[str, Any]], *, proposed: bool) -> str:
+    """What the whole run changed, from the candidate's diff and the register entries its tools
+    wrote. Deterministic, so the reply covers the run even when the model's last turn only
+    describes its corrections after a Validator round."""
+    lines = []
+    rank = {"attribute": 1, "relationship": 2}  # tables first: they're the headline change
+    for key, label in (("added", "Added"), ("changed", "Changed"), ("removed", "Removed")):
+        if diff.get(key):
+            items = sorted(diff[key], key=lambda d: rank.get(d.split(" ", 1)[0], 0))
+            lines.append(f"- {label} in the model{' (once applied)' if proposed else ''}: {_listed(items)}")
+    by_action: dict[str, list[str]] = {}
+    for item in activity:
+        record = item.get("record") if item.get("ok") else None
+        if record and record.get("code"):
+            codes = by_action.setdefault(record.get("action") or "changed", [])
+            if record["code"] not in codes:
+                codes.append(record["code"])
+    registers = [f"{action} {_listed(codes)}" for action, codes in by_action.items()]
+    if registers:
+        lines.append(f"- Registers: {'; '.join(registers)}")
+    if not lines:
+        return "**What this run changed:** nothing in the model or the registers."
+    return "**What this run changed:**\n" + "\n".join(lines)
+
+
 def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCandidate, *, refused: bool,
-            skipped: str | None, corrections: int) -> dict[str, Any]:
+            skipped: str | None, corrections: int, activity: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Recompute checks, escalate what remains, then apply or propose the candidate."""
     session.refresh(candidate)
     ctx.recheck(final=True)
@@ -538,8 +569,11 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
     validation = _validation_note(candidate, skipped, corrections, escalated)
     ready, blockers = design.candidate_readiness(session, scope, candidate)
     blocker_list = "\n".join(f"- {b}" for b in blockers)
+    _, diff = design.plan_changes(session, scope, candidate)  # against the live model, before any apply
+    empty = design.model_is_empty(session, scope, candidate.model_id)
+    changes = _changes_note(diff, activity or [], proposed=not empty)
 
-    if design.model_is_empty(session, scope, candidate.model_id) and not design.is_stale(session, scope, candidate):
+    if empty and not design.is_stale(session, scope, candidate):
         try:
             design.apply_candidate(session, scope, candidate.id)
         except Exception as exc:  # e.g. a payload the model got wrong; keep it for review instead
@@ -553,13 +587,13 @@ def _settle(session: Session, scope, ctx: ArchitectContext, candidate: DesignCan
         state = ("Nothing blocks review, so the model is **Ready for Review**; accepting it is your decision."
                  if ready else f"The model stays a **Draft** because of:\n{blocker_list}")
         return {"applied_seq": candidate.applied_seq,
-                "note": f"_Applied to the model as changeset {candidate.applied_seq}._ {validation}\n\n{state}"}
+                "note": f"{changes}\n\n_Applied to the model as changeset {candidate.applied_seq}._ {validation}\n\n{state}"}
     design.finish_candidate(candidate, CandidateStatus.PROPOSED)
     session.commit()
     state = ("Once applied, nothing blocks review, so it becomes Ready for Review." if ready else
              f"Once applied, it stays a Draft because of:\n{blocker_list}")
-    return {"note": "_The model already had content, so these changes are proposed: review the diff and apply "
-                    f"them._ {validation}\n\n{state}"}
+    return {"note": f"{changes}\n\n**Not applied yet.** The model already had content, so these changes are a "
+                    f"proposal: open **Review** to check the diff and apply or discard it. {validation}\n\n{state}"}
 
 
 def _candidate_event(session: Session, scope, candidate: DesignCandidate) -> dict[str, Any]:

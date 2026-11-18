@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { sendAgentMessage, uploadDocument, type AgentEvent } from "@/api/agent";
 import { ApiError, type Assessment } from "@/api/client";
 import {
+  useCandidates,
   useConversationAssessments,
   useConversations,
   useCreateConversation,
@@ -121,6 +122,7 @@ export function AssistantPanel({
   agent = "business_requirements",
   canViewRuns = false,
   onOpenRun,
+  onOpenReview,
   className,
 }: {
   path: ProjectPath;
@@ -139,6 +141,8 @@ export function AssistantPanel({
   /** Transcripts and monitor assessments need edit access. */
   canViewRuns?: boolean;
   onOpenRun?: (runId: string) => void;
+  /** Open the Review tab at a design candidate (Architect replies). */
+  onOpenReview?: (candidateId: string) => void;
   className?: string;
 }) {
   const conversations = useConversations(path, modelId);
@@ -151,6 +155,10 @@ export function AssistantPanel({
   const waitFor = newest?.run_id && Date.now() - new Date(newest.created_at).getTime() < 5 * 60_000 ? newest.run_id : undefined;
   const assessments = useConversationAssessments(path, conversation?.id, canViewRuns, waitFor ?? undefined);
   const assessmentOf = useMemo(() => new Map((assessments.data ?? []).map((a) => [a.run_id, a])), [assessments.data]);
+  // The design each Architect run produced, so its reply can point to Review.
+  const candidates = useCandidates(path, modelId ?? "", agent === "architect" && !!modelId);
+  const candidateOf = useMemo(() => new Map((candidates.data ?? []).filter((c) => c.run_id).map((c) => [c.run_id!, c])),
+    [candidates.data]);
   const documents = useDocuments(path);
   const invalidate = useInvalidateAfterAgent(path);
 
@@ -299,6 +307,10 @@ export function AssistantPanel({
             activity={fromSaved(m.activity)} onSelectRecord={onSelectRecord}
             run={m.role === "assistant" && m.run_id && canViewRuns
               ? { assessment: assessmentOf.get(m.run_id), onOpen: onOpenRun ? () => onOpenRun(m.run_id!) : undefined }
+              : undefined}
+            design={m.role === "assistant" && m.run_id && candidateOf.get(m.run_id) && onOpenReview
+              ? { status: candidateOf.get(m.run_id)!.status, canApply: canEdit,
+                  onOpen: () => onOpenReview(candidateOf.get(m.run_id!)!.id) }
               : undefined} />
         ))}
         {pending && (
@@ -376,6 +388,7 @@ function Message({
   activity = [],
   onSelectRecord,
   run,
+  design,
 }: {
   role: string;
   text: string;
@@ -384,6 +397,8 @@ function Message({
   onSelectRecord?: (id: string) => void;
   /** For a saved reply: its run's monitor assessment and a way to open the run. */
   run?: { assessment: Assessment | undefined; onOpen?: () => void };
+  /** For an Architect reply: the design it produced and a way to open it on Review. */
+  design?: { status: string; canApply: boolean; onOpen: () => void };
 }) {
   const isUser = role === "user";
   return (
@@ -407,6 +422,12 @@ function Message({
             ))}
           </div>
         )}
+        {design?.status === "proposed" && (
+          <div className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 py-1.5 text-xs">
+            <span className="flex-1 min-w-0">These changes aren't in the model yet.</span>
+            <Button size="sm" className="h-7 shrink-0" onClick={design.onOpen}>{design.canApply ? "Review and apply" : "Open Review"}</Button>
+          </div>
+        )}
         {run && (
           <>
             <FlaggedBanner assessment={run.assessment} onOpen={run.onOpen} />
@@ -415,6 +436,11 @@ function Message({
               {run.onOpen && (
                 <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={run.onOpen}>
                   <ScrollText className="size-3" /> View run
+                </button>
+              )}
+              {design && design.status !== "proposed" && (
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={design.onOpen}>
+                  <ShieldCheck className="size-3" /> Design on Review ({design.status})
                 </button>
               )}
             </div>

@@ -349,9 +349,10 @@ export function useLinkModelSource(path: ProjectPath, modelId: string) {
 
 // --- Design candidates (the Architect's proposals and the Validator's review) -------------
 
-export function useCandidates(path: ProjectPath, modelId: string) {
+export function useCandidates(path: ProjectPath, modelId: string, enabled = true) {
   return useQuery({
     queryKey: ["candidates", path.project_id, modelId],
+    enabled: enabled && !!modelId,
     queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/candidates", {
       params: { path: { ...path, model_id: modelId } },
     })),

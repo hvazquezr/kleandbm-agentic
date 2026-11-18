@@ -366,6 +366,7 @@ export default function ModelEditor() {
               onCandidate={onCandidate}
               canViewRuns={canEdit}
               onOpenRun={(runId) => setRunFocus({ runId })}
+              onOpenReview={(candidateId) => { setFocusCandidate(candidateId); setDrawer("review"); }}
             />
           ))}
         </div>
