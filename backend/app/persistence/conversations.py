@@ -181,6 +181,7 @@ class RunAssessment(Base):
 
     __tablename__ = "run_assessments"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "project_id", "id", name="uq_run_assessments_scope"),
         ForeignKeyConstraint(
             ["tenant_id", "project_id", "run_id"],
             ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
@@ -212,3 +213,76 @@ class RunAssessment(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AssessmentReview(Base):
+    """A person's verdict on a monitor assessment: whether its concern was real. Append-only;
+    the latest review is the current verdict. Only people review (never an agent), and the
+    verdicts are the labels that measure the monitor's precision on real runs."""
+
+    __tablename__ = "assessment_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "assessment_id"],
+            ["run_assessments.tenant_id", "run_assessments.project_id", "run_assessments.id"],
+            ondelete="CASCADE", name="fk_assessment_reviews_assessment",
+        ),
+        Index("ix_assessment_reviews_assessment", "tenant_id", "project_id", "assessment_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    assessment_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    verdict: Mapped[str] = mapped_column(String(24), nullable=False)  # concern_confirmed | false_alarm
+    note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(nullable=False)  # a user
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ContentFlag(Base):
+    """Untrusted content an agent found trying to instruct it: a document passage or a source
+    table or column (its comment or values). Durable, so a reviewer sees it on the document or
+    source and later runs start knowing. Non-blocking. A person can mark it reviewed."""
+
+    __tablename__ = "content_flags"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "run_id"],
+            ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
+            ondelete="CASCADE", name="fk_content_flags_run",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "document_version_id"],
+            ["document_versions.tenant_id", "document_versions.project_id", "document_versions.id"],
+            name="fk_content_flags_document_version",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "source_id"],
+            ["source_connections.tenant_id", "source_connections.project_id", "source_connections.id"],
+            name="fk_content_flags_source",
+        ),
+        Index("ix_content_flags_project", "tenant_id", "project_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)  # the run whose agent flagged it
+    agent: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False)  # document | source
+    document_version_id: Mapped[uuid.UUID | None] = mapped_column()
+    location: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # the passage's location
+    source_id: Mapped[uuid.UUID | None] = mapped_column()
+    source_table: Mapped[str | None] = mapped_column(String(200))
+    source_column: Mapped[str | None] = mapped_column(String(200))
+    quote: Mapped[str] = mapped_column(Text, nullable=False)  # the instruction, at most 300 characters
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column()
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)

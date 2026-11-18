@@ -1,10 +1,11 @@
-import { Bot, ChevronDown, ChevronRight, FileText, Loader2, Paperclip, Send, ShieldCheck, Sparkles, User, X, XCircle } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, FileText, Loader2, MessageSquareText, Paperclip, ScrollText, Send, ShieldCheck, Sparkles, User, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { toast } from "sonner";
 import { sendAgentMessage, uploadDocument, type AgentEvent } from "@/api/agent";
-import { ApiError } from "@/api/client";
+import { ApiError, type Assessment } from "@/api/client";
 import {
+  useConversationAssessments,
   useConversations,
   useCreateConversation,
   useDocuments,
@@ -16,10 +17,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { AssessmentChip, FlaggedBanner } from "@/components/runs/Assessment";
 import { cn } from "@/lib/utils";
 
 type Attachment = { versionId: string; label: string; status: string };
 type ToolActivity = {
+  /** Text the agent wrote between steps; kept in order with its tool calls. */
+  narration?: string;
   name: string;
   status: "started" | "ok" | "error";
   summary?: string;
@@ -47,6 +51,8 @@ const TOOL_LABELS: Record<string, string> = {
   source_candidate_key_check: "Checking a candidate key",
   source_relationship_check: "Checking a join",
   source_sample_rows: "Sampling rows",
+  source_coverage_check: "Checking coverage",
+  flag_untrusted_content: "Flagging untrusted content",
   get_candidate: "Reading the design",
   put_table: "Designing a table",
   put_relationships: "Setting relationships",
@@ -59,6 +65,16 @@ const TOOL_LABELS: Record<string, string> = {
   record_finding: "Recording a finding",
   submit_review: "Submitting the review",
 };
+
+/** Saved activity entries are {tool, ok, summary, record} or {kind: "narration", text}; the
+ *  live stream's are {name, status, …}. One shape for both. */
+function fromSaved(items: unknown[]): ToolActivity[] {
+  return (items as Record<string, unknown>[]).map((a) =>
+    a.kind === "narration"
+      ? { name: "narration", status: "ok", narration: String(a.text ?? "") }
+      : { name: String(a.tool ?? a.name ?? ""), status: a.ok === false || a.status === "error" ? "error" : "ok",
+          summary: a.summary as string | undefined, record: a.record as ToolActivity["record"], agent: a.agent as ToolActivity["agent"] });
+}
 
 const SUBAGENT_LABELS: Record<string, string> = {
   business_requirements: "Requirements",
@@ -102,6 +118,8 @@ export function AssistantPanel({
   draft,
   startDraft = 0,
   agent = "business_requirements",
+  canViewRuns = false,
+  onOpenRun,
   className,
 }: {
   path: ProjectPath;
@@ -115,6 +133,9 @@ export function AssistantPanel({
   /** Architect only: each new value starts a "design a draft model" run, unless one is running. */
   startDraft?: number;
   agent?: AgentName;
+  /** Transcripts and monitor assessments need edit access. */
+  canViewRuns?: boolean;
+  onOpenRun?: (runId: string) => void;
   className?: string;
 }) {
   const conversations = useConversations(path, modelId);
@@ -122,6 +143,11 @@ export function AssistantPanel({
   const conversation = conversations.data?.find((c) => c.agent === agent);
   const info = AGENTS[agent];
   const messages = useMessages(path, conversation?.id);
+  // The monitor reads a run after its reply is saved: wait a few minutes for the newest one.
+  const newest = [...(messages.data ?? [])].reverse().find((m) => m.role === "assistant" && m.run_id);
+  const waitFor = newest?.run_id && Date.now() - new Date(newest.created_at).getTime() < 5 * 60_000 ? newest.run_id : undefined;
+  const assessments = useConversationAssessments(path, conversation?.id, canViewRuns, waitFor ?? undefined);
+  const assessmentOf = useMemo(() => new Map((assessments.data ?? []).map((a) => [a.run_id, a])), [assessments.data]);
   const documents = useDocuments(path);
   const invalidate = useInvalidateAfterAgent(path);
 
@@ -260,7 +286,10 @@ export function AssistantPanel({
         {history.map((m) => (
           <Message key={m.id} role={m.role} text={m.text}
             attachments={m.attachments.map((id) => docLabels.get(id) ?? "attached document")}
-            activity={m.activity as ToolActivity[]} onSelectRecord={onSelectRecord} />
+            activity={fromSaved(m.activity)} onSelectRecord={onSelectRecord}
+            run={m.role === "assistant" && m.run_id && canViewRuns
+              ? { assessment: assessmentOf.get(m.run_id), onOpen: onOpenRun ? () => onOpenRun(m.run_id!) : undefined }
+              : undefined} />
         ))}
         {pending && (
           <>
@@ -335,12 +364,15 @@ function Message({
   attachments = [],
   activity = [],
   onSelectRecord,
+  run,
 }: {
   role: string;
   text: string;
   attachments?: string[];
   activity?: ToolActivity[];
   onSelectRecord?: (id: string) => void;
+  /** For a saved reply: its run's monitor assessment and a way to open the run. */
+  run?: { assessment: Assessment | undefined; onOpen?: () => void };
 }) {
   const isUser = role === "user";
   return (
@@ -364,6 +396,19 @@ function Message({
             ))}
           </div>
         )}
+        {run && (
+          <>
+            <FlaggedBanner assessment={run.assessment} onOpen={run.onOpen} />
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {run.assessment && <AssessmentChip assessment={run.assessment} onClick={run.onOpen} />}
+              {run.onOpen && (
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={run.onOpen}>
+                  <ScrollText className="size-3" /> View run
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -372,12 +417,15 @@ function Message({
 function ActivityList({ tools, onSelectRecord }: { tools: ToolActivity[]; onSelectRecord?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const records = tools.filter((t) => t.record?.code);
+  const notes = tools.filter((t) => t.narration).length;
+  const actions = tools.length - notes;
   return (
     <div className="text-xs text-muted-foreground">
       <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        {tools.length} action{tools.length === 1 ? "" : "s"}
+        {actions} action{actions === 1 ? "" : "s"}
         {records.length > 0 && ` · ${records.length} register change${records.length === 1 ? "" : "s"}`}
+        {notes > 0 && ` · ${notes} progress note${notes === 1 ? "" : "s"}`}
       </button>
       {!open && records.length > 0 && (
         <div className="mt-1 space-y-1">
@@ -393,9 +441,15 @@ function ActivityList({ tools, onSelectRecord }: { tools: ToolActivity[]; onSele
       )}
       {open && (
         <ul className="mt-1 space-y-0.5">
-          {tools.map((t, i) => (
+          {tools.map((t, i) => t.narration ? (
+            <li key={i} className="flex items-start gap-1.5 py-0.5 text-foreground/80">
+              <MessageSquareText className="size-3 shrink-0 mt-0.5" />
+              <span className="whitespace-pre-wrap break-words">{t.narration}</span>
+            </li>
+          ) : (
             <li key={i} className={cn("flex items-center gap-1.5", t.status === "error" && "text-amber-500")}>
               {t.status === "error" ? <XCircle className="size-3 shrink-0" /> : <span className="size-1.5 rounded-full bg-current shrink-0" />}
+              {t.agent && t.agent !== "review" && <SubagentTag agent={t.agent} />}
               <span className="truncate">{t.summary ?? TOOL_LABELS[t.name] ?? t.name}</span>
               {t.record?.code && <RecordChip code={t.record.code} onClick={() => onSelectRecord?.(t.record!.id)} />}
             </li>

@@ -434,14 +434,17 @@ def apply_changeset(
     *,
     model_id: uuid.UUID | None = None,
     reason: str | None = None,
+    settles_decision_point: bool = False,
 ) -> ChangesetResult:
-    """Apply operations atomically as one attributed changeset with a new seq."""
+    """Apply operations atomically as one attributed changeset with a new seq.
+    `settles_decision_point` is only for the decision-point resolve action (design.py), the one
+    place a decision_point question's status may change."""
     scope.require(Permission.PROJECT_EDIT)
     if not operations:
         raise InvalidOperation("a changeset needs at least one operation")
     if model_id is not None:
         get_model(session, scope, model_id)
-    return _ChangesetWriter(session, scope, model_id, reason).run(operations)
+    return _ChangesetWriter(session, scope, model_id, reason, settles_decision_point).run(operations)
 
 
 @dataclass
@@ -457,6 +460,7 @@ class _ChangesetWriter:
     scope: ProjectScope
     model_id: uuid.UUID | None
     reason: str | None
+    settles_decision_point: bool = False
     seq: int = 0
     refs: dict[str, uuid.UUID] = field(default_factory=dict)
     pending: dict[uuid.UUID, _Pending] = field(default_factory=dict)
@@ -676,8 +680,23 @@ class _ChangesetWriter:
         merged = {**current, **patch.model_dump(mode="python", exclude_unset=True)}
         data = PAYLOADS[record.record_type].model_validate(merged).model_dump(mode="python")
         self._guard_agent_authority(record.record_type, current, data)
+        self._guard_decision_point(record, current, data, created_here)
         self._check_references(record.record_type, data)
         self._write_revision(record, data, deleted=False, created_here=created_here)
+
+    def _guard_decision_point(self, record: Record, current: dict[str, Any], data: dict[str, Any] | None,
+                              created_here: bool) -> None:
+        """A decision_point question is settled only by accepting or rejecting the search's design
+        (`design.resolve_decision_point`), which also records the decision and clears the readiness
+        blocker. Answering, resolving or deleting it any other way would leave the blocker in place
+        without saying why, so it's refused, for people and agents alike."""
+        if (created_here or self.settles_decision_point or record.record_type is not RecordType.QUESTION
+                or current.get("kind") != "decision_point"):
+            return
+        if data is None or str(data.get("status")) != str(current.get("status")):
+            raise InvalidOperation(
+                "this question is about a design search that didn't select a design; settle it on the Review tab "
+                "by accepting or rejecting that design (which records the decision and clears its blocker)")
 
     def _check_expected(
         self, record_id: uuid.UUID, expected: int | None, current: int, created_here: bool
@@ -696,6 +715,7 @@ class _ChangesetWriter:
             self._check_expected(record_id, expected_seq, current_seq_, created_here)
             if record.model_id is not None and record.model_id != self.model_id:
                 raise InvalidOperation("record belongs to a different model than this changeset")
+        self._guard_decision_point(record, current, None, created_here)
         self._write_revision(record, current, deleted=True, created_here=created_here)
         self._remove_links_touching(record_id)
         for dependent_id in self._structural_dependents(record):

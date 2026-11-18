@@ -7,11 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain import documents, modeling
-from app.domain.access import NotFoundInScope, Permission, ProjectScope
+from app.domain.access import AccessDenied, ActorKind, NotFoundInScope, Permission, ProjectScope
 from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
 from app.persistence.conversations import (
-    AgentRun, Conversation, ConversationMessage, MessageRole, RunAssessment, RunMessage, RunStatus,
+    AgentRun, AssessmentReview, Conversation, ConversationMessage, MessageRole, RunAssessment, RunMessage, RunStatus,
 )
 
 AGENTS = {"business_requirements": "Requirements", "architect": "Architect"}
@@ -143,7 +143,10 @@ def run_transcript(
     session: Session, scope: ProjectScope, run_id: uuid.UUID, include_children: bool = True,
 ) -> list[tuple[AgentRun, RunMessage]]:
     """What the run's model saw and said, in order, and (by default) the runs it started
-    (consultations, Validator rounds, and theirs), each after its parent's entries."""
+    (consultations, Validator rounds, and theirs), each after its parent's entries. Needs edit
+    access: transcripts hold the agents' thinking, document passages and (masked) source values,
+    more than a viewer sees elsewhere."""
+    scope.require(Permission.PROJECT_EDIT)
     root = get_run(session, scope, run_id)
     runs, frontier = [root], [root]
     while include_children and frontier:
@@ -161,9 +164,66 @@ def run_transcript(
 
 
 def run_assessments(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> list[RunAssessment]:
-    """The transcript monitor's assessments of a run, newest first."""
+    """The transcript monitor's assessments of a run, newest first. Needs edit access, like the
+    transcript its concerns quote."""
+    scope.require(Permission.PROJECT_EDIT)
     get_run(session, scope, run_id)
     return list(session.scalars(
         select(RunAssessment).where(RunAssessment.tenant_id == scope.tenant_id, RunAssessment.project_id == scope.project_id,
                                     RunAssessment.run_id == run_id)
         .order_by(RunAssessment.created_at.desc())))
+
+
+VERDICTS = ("concern_confirmed", "false_alarm")
+
+
+def conversation_assessments(session: Session, scope: ProjectScope, conversation_id: uuid.UUID) -> list[RunAssessment]:
+    """The latest assessment of each run in a conversation, for showing beside its replies."""
+    scope.require(Permission.PROJECT_EDIT)
+    get_conversation(session, scope, conversation_id)
+    run_ids = select(ConversationMessage.run_id).where(
+        ConversationMessage.tenant_id == scope.tenant_id, ConversationMessage.project_id == scope.project_id,
+        ConversationMessage.conversation_id == conversation_id, ConversationMessage.run_id.is_not(None))
+    rows = session.scalars(
+        select(RunAssessment).where(RunAssessment.tenant_id == scope.tenant_id,
+                                    RunAssessment.project_id == scope.project_id,
+                                    RunAssessment.run_id.in_(run_ids))
+        .order_by(RunAssessment.run_id, RunAssessment.created_at.desc()))
+    latest: dict[uuid.UUID, RunAssessment] = {}
+    for a in rows:
+        latest.setdefault(a.run_id, a)
+    return list(latest.values())
+
+
+def assessment_reviews(session: Session, scope: ProjectScope, assessment_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[AssessmentReview]]:
+    """Reviews per assessment, newest first."""
+    if not assessment_ids:
+        return {}
+    out: dict[uuid.UUID, list[AssessmentReview]] = {}
+    for r in session.scalars(
+        select(AssessmentReview).where(AssessmentReview.tenant_id == scope.tenant_id,
+                                       AssessmentReview.project_id == scope.project_id,
+                                       AssessmentReview.assessment_id.in_(assessment_ids))
+        .order_by(AssessmentReview.created_at.desc())):
+        out.setdefault(r.assessment_id, []).append(r)
+    return out
+
+
+def review_assessment(session: Session, scope: ProjectScope, run_id: uuid.UUID, assessment_id: uuid.UUID,
+                      *, verdict: str, note: str | None) -> AssessmentReview:
+    """A person records whether a monitor assessment's concern was real. Agents can't."""
+    scope.require(Permission.PROJECT_EDIT)
+    if scope.actor.kind is not ActorKind.USER:
+        raise AccessDenied(Permission.PROJECT_EDIT)
+    assessment = next((a for a in run_assessments(session, scope, run_id) if a.id == assessment_id), None)
+    if assessment is None:
+        raise NotFoundInScope("assessment")
+    if assessment.status != "completed":
+        raise InvalidOperation("only a completed assessment can be reviewed")
+    if verdict not in VERDICTS:
+        raise InvalidOperation(f"verdict must be one of {', '.join(VERDICTS)}")
+    review = AssessmentReview(tenant_id=scope.tenant_id, project_id=scope.project_id, assessment_id=assessment.id,
+                              verdict=verdict, note=(note or "").strip()[:2000] or None, reviewed_by=scope.actor.id)
+    session.add(review)
+    session.flush()
+    return review

@@ -15,6 +15,10 @@ export type ModelState = Schemas["StateOut"]["effective_state"];
 export type Candidate = Schemas["CandidateOut"];
 export type CandidateSummary = Schemas["CandidateSummary"];
 export type DecisionPoint = Schemas["DecisionPointOut"];
+export type Assessment = Schemas["AssessmentOut"];
+export type ContentFlag = Schemas["ContentFlagOut"];
+export type RunMessage = Schemas["RunMessageOut"];
+export type Run = Schemas["RunOut"];
 
 let tokenGetter: (() => Promise<string>) | null = null;
 

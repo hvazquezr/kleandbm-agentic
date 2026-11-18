@@ -940,7 +940,7 @@ def resolve_decision_point(
                 "status": QuestionStatus.RESOLVED.value, "resolution": stamp[:8000]}))
     seq = None
     if ops:
-        result = modeling.apply_changeset(session, scope, ops,
+        result = modeling.apply_changeset(session, scope, ops, settles_decision_point=True,
                                           reason=f"Decision point {verb.lower()} by {name}")
         seq = result.seq
     dp.resolved_by = scope.actor.id

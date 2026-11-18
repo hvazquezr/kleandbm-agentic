@@ -14,11 +14,12 @@ import traceback
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.adapters.llm import LLMError
 from app.agents.architect import search
@@ -29,7 +30,7 @@ from app.api.source_routes import get_box
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.config import get_settings
 from app.persistence.conversations import AgentRun, RunStatus
-from app.domain import conversations
+from app.domain import conversations, flags
 
 def _mark_failed(session_factory, run_id: uuid.UUID, detail: str) -> None:
     """Never leave a run 'running': that would block the conversation for good."""
@@ -120,6 +121,19 @@ class UntrustedInstructionOut(BaseModel):
     followed: bool
 
 
+class AssessmentReviewOut(BaseModel):
+    id: uuid.UUID
+    verdict: str  # concern_confirmed | false_alarm
+    note: str | None
+    by_name: str | None
+    created_at: datetime
+
+
+class AssessmentReviewIn(BaseModel):
+    verdict: Literal["concern_confirmed", "false_alarm"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class AssessmentOut(BaseModel):
     id: uuid.UUID
     run_id: uuid.UUID
@@ -137,6 +151,34 @@ class AssessmentOut(BaseModel):
     detail: str | None
     created_at: datetime
     finished_at: datetime | None
+    # People's verdicts on this assessment, newest first (the first is the current one).
+    reviews: list[AssessmentReviewOut] = []
+
+
+class ContentFlagOut(BaseModel):
+    id: uuid.UUID
+    run_id: uuid.UUID
+    agent: str
+    target_kind: str  # document | source
+    document_id: uuid.UUID | None
+    document_version_id: uuid.UUID | None
+    document_title: str | None
+    version_no: int | None
+    location: dict[str, Any] | None
+    source_id: uuid.UUID | None
+    source_name: str | None
+    source_table: str | None
+    source_column: str | None
+    quote: str  # the planted text: untrusted, shown as data
+    reason: str
+    created_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by_name: str | None
+    review_note: str | None
+
+
+class ContentFlagReviewIn(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class RunMessageOut(BaseModel):
@@ -291,13 +333,89 @@ def get_run_messages(
     ]
 
 
-@router.get("/agent-runs/{run_id}/assessments")
-def get_run_assessments(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[AssessmentOut]:
-    """The transcript monitor's assessments of a top-level run, newest first. Pending while the
-    monitor reads the run; skipped when no monitor model is configured."""
+def _names(session, ids) -> dict[uuid.UUID, str | None]:
+    from app.persistence.models import User
+
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    return {u.id: u.display_name or u.email for u in session.scalars(select(User).where(User.id.in_(ids)))}
+
+
+def _assessments_out(session, scope, rows) -> list[AssessmentOut]:
+    reviews = conversations.assessment_reviews(session, scope, [a.id for a in rows])
+    names = _names(session, [r.reviewed_by for rs in reviews.values() for r in rs])
     return [AssessmentOut(
         id=a.id, run_id=a.run_id, status=a.status, monitor_model=a.monitor_model, score=a.score, flagged=a.flagged,
         summary=a.summary, concerns=a.concerns, untrusted_instructions=a.untrusted_instructions, samples=a.samples,
         input_tokens=a.input_tokens, output_tokens=a.output_tokens, truncated=a.truncated, detail=a.detail,
         created_at=a.created_at, finished_at=a.finished_at,
-    ) for a in conversations.run_assessments(session, scope, run_id)]
+        reviews=[AssessmentReviewOut(id=r.id, verdict=r.verdict, note=r.note, by_name=names.get(r.reviewed_by),
+                                     created_at=r.created_at) for r in reviews.get(a.id, [])],
+    ) for a in rows]
+
+
+@router.get("/agent-runs/{run_id}/assessments")
+def get_run_assessments(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[AssessmentOut]:
+    """The transcript monitor's assessments of a top-level run, newest first. Pending while the
+    monitor reads the run; skipped when no monitor model is configured. Needs edit access."""
+    return _assessments_out(session, scope, conversations.run_assessments(session, scope, run_id))
+
+
+@router.get("/conversations/{conversation_id}/assessments")
+def get_conversation_assessments(conversation_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[AssessmentOut]:
+    """The latest assessment of each run in a conversation, to show beside its replies."""
+    return _assessments_out(session, scope, conversations.conversation_assessments(session, scope, conversation_id))
+
+
+@router.post("/agent-runs/{run_id}/assessments/{assessment_id}/reviews", status_code=status.HTTP_201_CREATED)
+def review_assessment(run_id: uuid.UUID, assessment_id: uuid.UUID, body: AssessmentReviewIn, session: SessionDep,
+                      scope: ProjectScopeDep) -> AssessmentReviewOut:
+    """A person's verdict on a monitor assessment: was the concern real? Append-only."""
+    r = conversations.review_assessment(session, scope, run_id, assessment_id, verdict=body.verdict, note=body.note)
+    session.commit()
+    return AssessmentReviewOut(id=r.id, verdict=r.verdict, note=r.note, by_name=_names(session, [r.reviewed_by]).get(r.reviewed_by),
+                               created_at=r.created_at)
+
+
+def _flags_out(session, scope, rows) -> list[ContentFlagOut]:
+    from app.persistence.documents import Document, DocumentVersion
+    from app.persistence.sources import SourceConnection
+
+    versions = {v.id: v for v in session.scalars(select(DocumentVersion).where(
+        DocumentVersion.tenant_id == scope.tenant_id, DocumentVersion.project_id == scope.project_id,
+        DocumentVersion.id.in_([f.document_version_id for f in rows if f.document_version_id])))}
+    docs = {d.id: d for d in session.scalars(select(Document).where(
+        Document.tenant_id == scope.tenant_id, Document.project_id == scope.project_id,
+        Document.id.in_([v.document_id for v in versions.values()])))}
+    srcs = {c.id: c for c in session.scalars(select(SourceConnection).where(
+        SourceConnection.tenant_id == scope.tenant_id, SourceConnection.project_id == scope.project_id,
+        SourceConnection.id.in_([f.source_id for f in rows if f.source_id])))}
+    names = _names(session, [f.reviewed_by for f in rows])
+    out = []
+    for f in rows:
+        v = versions.get(f.document_version_id)
+        out.append(ContentFlagOut(
+            id=f.id, run_id=f.run_id, agent=f.agent, target_kind=f.target_kind,
+            document_id=v.document_id if v else None, document_version_id=f.document_version_id,
+            document_title=docs[v.document_id].title if v and v.document_id in docs else None,
+            version_no=v.version_no if v else None, location=f.location, source_id=f.source_id,
+            source_name=srcs[f.source_id].name if f.source_id in srcs else None, source_table=f.source_table,
+            source_column=f.source_column, quote=f.quote, reason=f.reason, created_at=f.created_at,
+            reviewed_at=f.reviewed_at, reviewed_by_name=names.get(f.reviewed_by), review_note=f.review_note))
+    return out
+
+
+@router.get("/content-flags")
+def list_content_flags(session: SessionDep, scope: ProjectScopeDep, include_reviewed: bool = False) -> list[ContentFlagOut]:
+    """Untrusted content agents flagged for trying to instruct them, newest first."""
+    return _flags_out(session, scope, flags.list_flags(session, scope, include_reviewed=include_reviewed))
+
+
+@router.post("/content-flags/{flag_id}/review")
+def review_content_flag(flag_id: uuid.UUID, body: ContentFlagReviewIn, session: SessionDep,
+                        scope: ProjectScopeDep) -> ContentFlagOut:
+    """A person marks a flag reviewed. Agents can't."""
+    f = flags.review_flag(session, scope, flag_id, body.note)
+    session.commit()
+    return _flags_out(session, scope, [f])[0]

@@ -15,7 +15,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import type { AttributeRecord, RelationshipRecord, TableRecord } from "@/api/client";
 import { computeAutoLayout, type Positions } from "./autoLayout";
 import RelationshipEdge, { type RelationshipFlowEdge } from "./RelationshipEdge";
-import TableNode, { type TableFlowNode } from "./TableNode";
+import TableNode, { type TableFlowNode, type TableValidation } from "./TableNode";
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { relationship: RelationshipEdge };
@@ -39,6 +39,8 @@ type Props = {
   selectedTableId: string | null;
   selectedRelationshipId: string | null;
   highlightedIds?: Set<string>;
+  /** Failed and unverified validation checks per table (the table's own or its attributes'). */
+  validation?: Map<string, TableValidation>;
   onSelectTable: (id: string | null) => void;
   /** Double-click: open the table's editor. */
   onOpenTable?: (id: string) => void;
@@ -57,7 +59,7 @@ export type CanvasMenuTarget =
 const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
   const {
     tables, attributes, relationships, savedLayout, readOnly,
-    selectedTableId, selectedRelationshipId, highlightedIds,
+    selectedTableId, selectedRelationshipId, highlightedIds, validation,
     onSelectTable, onOpenTable, onSelectRelationship, onMoveTable, onConnectTables, onContextMenu,
   } = props;
   const { fitView, screenToFlowPosition, getNode, setCenter, getZoom } = useReactFlow();
@@ -92,10 +94,11 @@ const Inner = forwardRef<ModelCanvasHandle, Props>(function Inner(props, ref) {
           attributes: attributesByTable.get(t.id) ?? [],
           highlighted: highlightedIds?.has(t.id),
           connectable: !readOnly,
+          validation: validation?.get(t.id),
         },
       }));
     });
-  }, [tables, attributesByTable, savedLayout, fallbackLayout, selectedTableId, readOnly, highlightedIds]);
+  }, [tables, attributesByTable, savedLayout, fallbackLayout, selectedTableId, readOnly, highlightedIds, validation]);
 
   const edges = useMemo<RelationshipFlowEdge[]>(() => {
     const groups = new Map<string, RelationshipRecord[]>();

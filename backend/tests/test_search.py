@@ -445,6 +445,16 @@ def test_an_unselected_search_asks_a_person_and_their_acceptance_is_logged(proj,
         with pytest.raises(AccessDenied):
             design.resolve_decision_point(s, scope, uuid_of(point["id"]), "accepted")
 
+    # Answering or resolving the question any other way (the registers, or the Business
+    # Requirements agent after a chat answer) would leave the blocker in place: refused.
+    for data in ({"status": "resolved", "resolution": "Accept it"}, {"status": "answered"}):
+        r = proj.alice.post(f"{proj.base}/changesets", json={"operations": [
+            {"op": "update", "id": question["id"], "expected_seq": question["seq"], "data": data}]})
+        assert r.status_code == 409 and "settle it on the Review tab" in r.text, r.text
+    r = proj.alice.post(f"{proj.base}/changesets", json={"operations": [
+        {"op": "delete", "id": question["id"], "expected_seq": question["seq"]}]})
+    assert r.status_code == 409 and "settle it on the Review tab" in r.text
+
     r = proj.alice.post(f"{proj.base}/decision-points/{point['id']}/resolve",
                         json={"outcome": "accepted", "note": "Profit by order stays out of scope."})
     assert r.status_code == 200, r.text

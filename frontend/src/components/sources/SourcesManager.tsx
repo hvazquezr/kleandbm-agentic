@@ -12,6 +12,7 @@ import {
 } from "@/api/hooks";
 import { Field } from "@/components/editor/fields";
 import { useConfirm } from "@/components/editor/useConfirm";
+import { FlaggedContent } from "@/components/runs/FlaggedContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,6 +87,7 @@ function SourceRow({ path, source, isOwner, canEdit, modelId }: {
         </span>
       </div>
       {check?.problems?.map((p, i) => <p key={i} className="text-xs text-red-400">{p}</p>)}
+      <FlaggedContent path={path} canEdit={canEdit} sourceId={source.id} title="Flagged by agents" />
       {check?.warnings?.map((w, i) => <p key={i} className="text-xs text-amber-500">{w}</p>)}
       {source.last_verified_at && (
         <p className="text-xs text-muted-foreground">

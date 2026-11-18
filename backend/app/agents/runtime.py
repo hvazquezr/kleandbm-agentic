@@ -101,6 +101,11 @@ class Loop:
         self.session.commit()
         self.usage.add(turn.usage)
         self.run.iterations = state["iterations"] + 1
+        if turn.tool_calls and (turn.text or "").strip():
+            # Text between steps ("I've read the passages; next I'll…") streams to the user live;
+            # keep it in order with the tool activity so a reloaded reply reads the same. Only the
+            # final step's text becomes the reply itself.
+            self.activity.append({"kind": "narration", "text": turn.text.strip()[:4000]})
         stop = None
         if turn.stop_reason == "refusal":
             stop = "refusal"

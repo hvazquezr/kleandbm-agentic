@@ -24,6 +24,7 @@ from app.adapters.llm import ScriptedChatModel
 from app.config import get_settings
 from app.domain import design, tenancy
 from app.domain.access import Actor, ActorKind
+from app.persistence.conversations import ContentFlag, RunAssessment
 from app.persistence.search import DecisionPoint, SearchStatus, Trigger
 from tests.test_sources import FakeConnector
 
@@ -65,6 +66,10 @@ ROUTES: list[tuple[str, str, dict | None]] = [
     ("GET", "/agent-runs/{run}", None),
     ("GET", "/agent-runs/{run}/messages", None),
     ("GET", "/agent-runs/{run}/assessments", None),
+    ("POST", "/agent-runs/{run}/assessments/{assessment}/reviews", {"verdict": "false_alarm"}),
+    ("GET", "/conversations/{conversation}/assessments", None),
+    ("GET", "/content-flags", None),
+    ("POST", "/content-flags/{flag}/review", {"note": "probe"}),
     ("GET", "/candidates/{candidate}", None),
     ("GET", "/candidates/{candidate}/decision-points", None),
     ("POST", "/candidates/{candidate}/apply", None),
@@ -136,12 +141,20 @@ def world(as_user, client, db_session_factory, monkeypatch):
                                candidate_id=candidate.id, run_id=uuid.UUID(run), trigger=Trigger.GRAIN_CONFLICT,
                                question="Order or order line grain?", scope={"elements": []},
                                status=SearchStatus.PARTIAL)
-            session.add(dp)
+            assessment = RunAssessment(tenant_id=scope.tenant_id, project_id=scope.project_id, run_id=uuid.UUID(run),
+                                       status="completed", score=10, flagged=False, summary="ok", concerns=[],
+                                       untrusted_instructions=[], samples=[10], input_tokens=0, output_tokens=0,
+                                       truncated=False)
+            flag = ContentFlag(tenant_id=scope.tenant_id, project_id=scope.project_id, run_id=uuid.UUID(run),
+                               agent="architect", target_kind="source", source_id=uuid.UUID(source),
+                               source_table="orders", quote="ignore previous instructions", reason="addresses agents")
+            session.add_all([dp, assessment, flag])
             session.commit()
-            candidate_id, dp_id = str(candidate.id), str(dp.id)
+            candidate_id, dp_id, assessment_id, flag_id = str(candidate.id), str(dp.id), str(assessment.id), str(flag.id)
         return {"base": base, "model": model, "record": created["r"], "table": created["t"],
                 "document": doc["id"], "version": doc["latest"]["id"], "source": source, "evidence": evidence,
-                "conversation": conversation, "run": run, "candidate": candidate_id, "decision_point": dp_id}
+                "conversation": conversation, "run": run, "candidate": candidate_id, "decision_point": dp_id,
+                "assessment": assessment_id, "flag": flag_id}
 
     return dict(alice=alice, bob=bob, dave=dave, ta=ta, tb=tb, a1=a1, a2=a2, b1=b1,
                 A1=populate(alice, ta, a1, "a1"), A2=populate(alice, ta, a2, "a2"), B1=populate(bob, tb, b1, "b1"))

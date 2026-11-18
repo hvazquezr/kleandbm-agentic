@@ -64,7 +64,8 @@ GET_CANDIDATE_SPEC = ToolSpec(
     _obj({}),
 )
 
-READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents")]
+READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents",
+                                                    "flag_untrusted_content")]
 TOOL_SPECS = [replace(s, strict=s.name in {"record_finding"})
               for s in [GET_CANDIDATE_SPEC, *READ_SPECS, *at.SOURCE_TOOL_SPECS, FINDING_SPEC, SUBMIT_SPEC]]
 
@@ -206,10 +207,11 @@ HANDLERS = {
     "list_documents": rt.list_documents,
     "read_document": rt.read_document,
     "search_documents": rt.search_documents,
+    "flag_untrusted_content": rt.flag_untrusted_content,
     **at.SOURCE_HANDLERS,
     "record_finding": record_finding,
     "submit_review": submit_review,
 }
 # Source calls are evidence and commit right away; findings live on the context until the round ends.
-WRITE_TOOLS = set(at.SOURCE_HANDLERS) - {"list_sources"}
+WRITE_TOOLS = (set(at.SOURCE_HANDLERS) - {"list_sources"}) | {"flag_untrusted_content"}
 assert set(HANDLERS) == {s.name for s in TOOL_SPECS}

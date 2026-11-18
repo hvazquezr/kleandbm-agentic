@@ -1,8 +1,10 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Loader2, ShieldCheck, UserPen, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Loader2, ScrollText, ShieldCheck, UserPen, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Candidate, Snapshot } from "@/api/client";
-import { useCandidate, useCandidateAction, useCandidates, type ProjectPath } from "@/api/hooks";
+import { useCandidate, useCandidateAction, useCandidates, useRunAssessments, type ProjectPath } from "@/api/hooks";
+import { FlaggedBanner } from "@/components/runs/Assessment";
+import { FlaggedContent } from "@/components/runs/FlaggedContent";
 import { useConfirm } from "@/components/editor/useConfirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,8 @@ export function ReviewPanel({
   canEdit,
   focusCandidateId,
   onSelectRecord,
+  canViewRuns = false,
+  onOpenRun,
 }: {
   path: ProjectPath;
   modelId: string;
@@ -64,6 +68,10 @@ export function ReviewPanel({
   /** Show this candidate (e.g. the one an Architect run just produced). */
   focusCandidateId?: string;
   onSelectRecord: (id: string) => void;
+  /** Transcripts and monitor assessments need edit access. */
+  canViewRuns?: boolean;
+  /** Open a run's transcript, optionally at one of its child runs (a Validator round). */
+  onOpenRun?: (runId: string, childRunId?: string) => void;
 }) {
   const candidates = useCandidates(path, modelId);
   const [chosen, setChosen] = useState<string | undefined>(focusCandidateId);
@@ -72,17 +80,22 @@ export function ReviewPanel({
   const current = chosen ?? list[0]?.id;
   const candidate = useCandidate(path, current);
 
+  const flagged = <FlaggedContent path={path} canEdit={canEdit} />;
   if (candidates.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (list.length === 0) {
     return (
+      <div className="space-y-5">
+      {flagged}
       <div className="text-sm text-muted-foreground space-y-2 rounded-md border border-dashed p-3">
         <p className="font-medium text-foreground flex items-center gap-2"><ShieldCheck className="size-4" /> No designs yet</p>
         <p>Ask the Architect for a draft on the Assistant tab. Its design and the Validator's review appear here.</p>
+      </div>
       </div>
     );
   }
   return (
     <div className="space-y-5">
+      {flagged}
       {list.length > 1 && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>Design</span>
@@ -97,15 +110,20 @@ export function ReviewPanel({
         </div>
       )}
       {candidate.data ? (
-        <CandidateView path={path} candidate={candidate.data} snapshot={snapshot} canEdit={canEdit} onSelectRecord={onSelectRecord} />
+        <CandidateView path={path} candidate={candidate.data} snapshot={snapshot} canEdit={canEdit} onSelectRecord={onSelectRecord}
+          canViewRuns={canViewRuns} onOpenRun={onOpenRun} />
       ) : <p className="text-sm text-muted-foreground">Loading…</p>}
     </div>
   );
 }
 
-function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
+function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord, canViewRuns, onOpenRun }: {
   path: ProjectPath; candidate: Candidate; snapshot: Snapshot; canEdit: boolean; onSelectRecord: (id: string) => void;
+  canViewRuns: boolean; onOpenRun?: (runId: string, childRunId?: string) => void;
 }) {
+  const assessments = useRunAssessments(path, candidate.run_id ?? undefined, canViewRuns);
+  const openRun = candidate.run_id && canViewRuns && onOpenRun
+    ? (child?: string) => onOpenRun(candidate.run_id!, child) : undefined;
   const apply = useCandidateAction(path, "apply");
   const discard = useCandidateAction(path, "discard");
   const [confirm, dialog] = useConfirm();
@@ -140,9 +158,16 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
   return (
     <div className="space-y-5">
       {dialog}
+      {canViewRuns && <FlaggedBanner assessment={assessments.data?.[0]} onOpen={openRun && (() => openRun())} />}
       <section className="space-y-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">Design</h3>
+          {openRun && (
+            <button type="button" className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => openRun()}>
+              <ScrollText className="size-3" /> Architect run
+            </button>
+          )}
           <Badge variant="outline" className="font-normal">{candidate.status}</Badge>
           <span className="text-xs text-muted-foreground font-mono">from seq {candidate.base_seq}{candidate.applied_seq ? ` → seq ${candidate.applied_seq}` : ""}</span>
         </div>
@@ -183,7 +208,7 @@ function CandidateView({ path, candidate, snapshot, canEdit, onSelectRecord }: {
       <section className="space-y-2">
         <h3 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="size-4" /> Validator review</h3>
         {!last && <p className="text-sm text-muted-foreground">Not reviewed, so the design is unverified.</p>}
-        {last && <RoundView round={last} codes={codes} onSelectRecord={onSelectRecord} />}
+        {last && <RoundView round={last} codes={codes} onSelectRecord={onSelectRecord} onOpen={openRun && (() => openRun(last.run_id))} />}
         {rounds.length > 1 && <EarlierRounds rounds={rounds.slice(0, -1)} attempts={candidate.issue_attempts} />}
       </section>
 
@@ -268,8 +293,8 @@ function DiffList({ label, tone, items }: { label: string; tone: string; items: 
   );
 }
 
-function RoundView({ round, codes, onSelectRecord }: {
-  round: Round; codes: Map<string, { code: string | null; id: string }>; onSelectRecord: (id: string) => void;
+function RoundView({ round, codes, onSelectRecord, onOpen }: {
+  round: Round; codes: Map<string, { code: string | null; id: string }>; onSelectRecord: (id: string) => void; onOpen?: () => void;
 }) {
   const order = { failed: 0, unverified: 1, passed: 2 } as const;
   const findings = [...round.findings].sort((a, b) =>
@@ -282,6 +307,11 @@ function RoundView({ round, codes, onSelectRecord }: {
         {round.status === "completed"
           ? <><span className="text-green-400">{count("passed")} passed</span>, <span className="text-red-400">{count("failed")} failed</span>, <span className="text-amber-400">{count("unverified")} unverified</span></>
           : <span className="text-amber-400">didn't complete ({round.detail})</span>}
+        {onOpen && (
+          <button type="button" className="ml-2 inline-flex items-center gap-1 hover:text-foreground" onClick={onOpen}>
+            <ScrollText className="size-3" /> transcript
+          </button>
+        )}
       </div>
       {round.summary && <p className="text-sm text-muted-foreground">{round.summary}</p>}
       <ul className="space-y-1.5">

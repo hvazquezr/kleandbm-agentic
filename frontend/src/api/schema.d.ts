@@ -136,11 +136,31 @@ export interface paths {
         /**
          * Get Run Assessments
          * @description The transcript monitor's assessments of a top-level run, newest first. Pending while the
-         *     monitor reads the run; skipped when no monitor model is configured.
+         *     monitor reads the run; skipped when no monitor model is configured. Needs edit access.
          */
         get: operations["get_run_assessments_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments/{assessment_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Assessment
+         * @description A person's verdict on a monitor assessment: was the concern real? Append-only.
+         */
+        post: operations["review_assessment_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments__assessment_id__reviews_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -261,6 +281,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/content-flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Content Flags
+         * @description Untrusted content agents flagged for trying to instruct them, newest first.
+         */
+        get: operations["list_content_flags_tenants__tenant_id__projects__project_id__content_flags_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/content-flags/{flag_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Content Flag
+         * @description A person marks a flag reviewed. Agents can't.
+         */
+        post: operations["review_content_flag_tenants__tenant_id__projects__project_id__content_flags__flag_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/conversations": {
         parameters: {
             query?: never;
@@ -273,6 +333,26 @@ export interface paths {
         put?: never;
         /** Create Conversation */
         post: operations["create_conversation_tenants__tenant_id__projects__project_id__conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/projects/{project_id}/conversations/{conversation_id}/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation Assessments
+         * @description The latest assessment of each run in a conversation, to show beside its replies.
+         */
+        get: operations["get_conversation_assessments_tenants__tenant_id__projects__project_id__conversations__conversation_id__assessments_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -855,6 +935,11 @@ export interface components {
             /** Output Tokens */
             output_tokens: number;
             /**
+             * Reviews
+             * @default []
+             */
+            reviews: components["schemas"]["AssessmentReviewOut"][];
+            /**
              * Run Id
              * Format: uuid
              */
@@ -878,6 +963,35 @@ export interface components {
             agent: string;
             /** Ordinal */
             ordinal: number;
+        };
+        /** AssessmentReviewIn */
+        AssessmentReviewIn: {
+            /** Note */
+            note?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "concern_confirmed" | "false_alarm";
+        };
+        /** AssessmentReviewOut */
+        AssessmentReviewOut: {
+            /** By Name */
+            by_name: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /** Verdict */
+            verdict: string;
         };
         /** AttributeData */
         AttributeData: {
@@ -1165,6 +1279,63 @@ export interface components {
             port?: number | null;
             /** Username */
             username?: string | null;
+        };
+        /** ContentFlagOut */
+        ContentFlagOut: {
+            /** Agent */
+            agent: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Document Id */
+            document_id: string | null;
+            /** Document Title */
+            document_title: string | null;
+            /** Document Version Id */
+            document_version_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Location */
+            location: {
+                [key: string]: unknown;
+            } | null;
+            /** Quote */
+            quote: string;
+            /** Reason */
+            reason: string;
+            /** Review Note */
+            review_note: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Reviewed By Name */
+            reviewed_by_name: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Source Column */
+            source_column: string | null;
+            /** Source Id */
+            source_id: string | null;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Table */
+            source_table: string | null;
+            /** Target Kind */
+            target_kind: string;
+            /** Version No */
+            version_no: number | null;
+        };
+        /** ContentFlagReviewIn */
+        ContentFlagReviewIn: {
+            /** Note */
+            note?: string | null;
         };
         /** ConversationIn */
         ConversationIn: {
@@ -2681,6 +2852,44 @@ export interface operations {
             };
         };
     };
+    review_assessment_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments__assessment_id__reviews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                assessment_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssessmentReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentReviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_run_messages_tenants__tenant_id__projects__project_id__agent_runs__run_id__messages_get: {
         parameters: {
             query?: {
@@ -2884,6 +3093,77 @@ export interface operations {
             };
         };
     };
+    list_content_flags_tenants__tenant_id__projects__project_id__content_flags_get: {
+        parameters: {
+            query?: {
+                include_reviewed?: boolean;
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentFlagOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_content_flag_tenants__tenant_id__projects__project_id__content_flags__flag_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flag_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentFlagReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentFlagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_tenants__tenant_id__projects__project_id__conversations_get: {
         parameters: {
             query?: {
@@ -2941,6 +3221,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_assessments_tenants__tenant_id__projects__project_id__conversations__conversation_id__assessments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentOut"][];
                 };
             };
             /** @description Validation Error */

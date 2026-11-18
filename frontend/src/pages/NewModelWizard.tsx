@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, Database, FileText, Loader2, MessageSquare, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Database, FileText, Flag, Loader2, MessageSquare, Sparkles, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useParams } from "wouter";
@@ -12,6 +12,7 @@ import {
   type ProjectPath,
 } from "@/api/hooks";
 import { SourcesManager } from "@/components/sources/SourcesManager";
+import { useFlagCounts } from "@/components/runs/FlaggedContent";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { Field } from "@/components/editor/fields";
 import { Badge } from "@/components/ui/badge";
@@ -134,6 +135,7 @@ function ContextStep({ path, ctx, setCtx, modelId, onDone }: {
 
 function DocumentsStep({ path, onBack, onNext }: { path: ProjectPath; onBack: () => void; onNext: () => void }) {
   const documents = useDocuments(path);
+  const flagCounts = useFlagCounts(path);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const upload = async (files: FileList | null) => {
@@ -173,6 +175,11 @@ function DocumentsStep({ path, onBack, onNext }: { path: ProjectPath; onBack: ()
             <FileText className="size-4 text-muted-foreground" />
             <span className="truncate">{d.title}</span>
             <span className="text-xs text-muted-foreground">v{d.latest.version_no}</span>
+            {flagCounts.byDocument.get(d.id) && (
+              <Badge variant="outline" className="gap-1 font-normal text-amber-500" title="An agent found text here that tried to instruct it; see the Review tab">
+                <Flag className="size-3" /> flagged
+              </Badge>
+            )}
             <Badge variant="outline" className={cn("ml-auto font-normal",
               d.latest.status === "ready" ? "text-green-400" : d.latest.status.includes("failed") ? "text-red-400" : "text-amber-400")}>
               {humanize(d.latest.status)}

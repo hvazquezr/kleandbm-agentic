@@ -92,6 +92,7 @@ export function RegistersPanel({
   canApprove = false,
   write,
   only,
+  onOpenReview,
 }: {
   snapshot: Snapshot;
   onSelectRecord: (id: string) => void;
@@ -99,6 +100,8 @@ export function RegistersPanel({
   write?: Write;
   /** Show one register instead of all of them. */
   only?: RegisterKey;
+  /** Open the Review tab, where decision-point questions are settled. */
+  onOpenReview?: () => void;
 }) {
   const show = (k: RegisterKey) => !only || only === k;
   const trace = useMemo(() => buildTrace(snapshot), [snapshot]);
@@ -150,7 +153,15 @@ export function RegistersPanel({
       {show("questions") && (
       <Section title="Questions & conflicts" count={snapshot.questions.length}>
         {snapshot.questions.map((q) => (
-          <Item key={q.id} code={q.code} onClick={() => onSelectRecord(q.id)}>
+          <Item key={q.id} code={q.code} onClick={() => onSelectRecord(q.id)}
+            actions={q.data.kind === "decision_point" && q.data.status === "open" ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>Settled on the Review tab, by accepting or rejecting the design the search left. Answering it here or in chat doesn't clear the blocker.</span>
+                {onOpenReview && (
+                  <Button size="sm" variant="outline" className="h-7" onClick={onOpenReview}>Open Review</Button>
+                )}
+              </div>
+            ) : undefined}>
             <div>{q.data.description}</div>
             <div className="flex flex-wrap gap-1.5">
               <Status value={q.data.status} />

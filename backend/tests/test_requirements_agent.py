@@ -129,7 +129,8 @@ def test_agent_reads_documents_records_conflicting_definitions_and_asks(proj, db
     messages = proj.alice.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").json()
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[0]["attachments"] == [version["id"]]
-    assert [a["tool"] for a in messages[1]["activity"]][-1] == "raise_question"
+    assert [a["tool"] for a in messages[1]["activity"] if "tool" in a][-1] == "raise_question"
+    assert messages[1]["activity"][0] == {"kind": "narration", "text": "Let me review the documents first."}
 
 
 def test_second_message_includes_history(proj):
@@ -281,7 +282,7 @@ def test_tool_schemas_fit_strict_mode():
 
     unsupported = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
                    "minLength", "maxLength", "pattern", "minItems", "maxItems", "format"}
-    for spec in TOOL_SPECS:
+    for spec in (s for s in TOOL_SPECS if s.strict):  # the rules are strict mode's; others are checked by handlers
         for node in _walk(spec.input_schema):
             assert not unsupported & set(node), f"{spec.name}: unsupported keyword in {node}"
             if node.get("type") == "object":

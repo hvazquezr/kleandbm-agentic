@@ -5,6 +5,8 @@ import { useLocation, useParams } from "wouter";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { ElementTrace } from "@/components/design/ElementTrace";
 import { ReviewPanel } from "@/components/design/ReviewPanel";
+import { RunViewDialog, type RunFocus } from "@/components/runs/RunView";
+import type { TableValidation } from "@/components/canvas/TableNode";
 import type { AgentName } from "@/api/hooks";
 import { buildTrace } from "@/lib/trace";
 import { SourcesManager } from "@/components/sources/SourcesManager";
@@ -69,6 +71,7 @@ export default function ModelEditor() {
   const [focusCandidate, setFocusCandidate] = useState<string | undefined>(undefined);
   // Bumped to start an Architect draft run in the (always mounted) Architect panel.
   const [draftRequest, setDraftRequest] = useState(0);
+  const [runFocus, setRunFocus] = useState<RunFocus | null>(null);
   const linkedSources = useModelSources(path, modelId);
 
   const role = project.data?.role;
@@ -108,6 +111,23 @@ export default function ModelEditor() {
     setEditing({ kind: "relationship", id });
   }, []);
   const trace = useMemo(() => (snap ? buildTrace(snap) : null), [snap]);
+  // Failed and unverified checks per table, on the table itself or its attributes, for the canvas.
+  const validation = useMemo(() => {
+    const out = new Map<string, TableValidation>();
+    if (!snap || !trace) return out;
+    for (const t of snap.tables) {
+      const ids = [t.id, ...snap.attributes.filter((a) => a.data.table_id === t.id).map((a) => a.id)];
+      const checks = trace.checksFor(ids).filter((c) => c.data.status !== "passed");
+      if (!checks.length) continue;
+      out.set(t.id, {
+        failed: checks.filter((c) => c.data.status === "failed").length,
+        unverified: checks.filter((c) => c.data.status === "unverified").length,
+        blocking: checks.filter((c) => c.data.is_blocking).length,
+        summaries: checks.slice(0, 5).map((c) => `${c.code ?? ""} ${c.data.status}: ${c.data.summary}`.trim()),
+      });
+    }
+    return out;
+  }, [snap, trace]);
   // Any record reference (chips in chat, registers, review): model elements open their editor
   // and are found on the canvas; register entries open their history and impact.
   const selectRecord = useCallback((id: string) => {
@@ -229,6 +249,7 @@ export default function ModelEditor() {
             attributes={snap.attributes}
             relationships={snap.relationships}
             savedLayout={layout}
+            validation={validation}
             readOnly={readOnly}
             selectedTableId={selectedTable?.id ?? null}
             selectedRelationshipId={selectedRel?.id ?? null}
@@ -339,6 +360,8 @@ export default function ModelEditor() {
               startDraft={a === "architect" ? draftRequest : 0}
               onSelectRecord={selectRecord}
               onCandidate={onCandidate}
+              canViewRuns={canEdit}
+              onOpenRun={(runId) => setRunFocus({ runId })}
             />
           ))}
         </div>
@@ -347,7 +370,8 @@ export default function ModelEditor() {
         <Drawer width={DRAWER_WIDTH.review} onClose={() => setDrawer(null)} title={<><ShieldCheck className="size-4" /> Review</>}>
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <ReviewPanel path={path} modelId={modelId} snapshot={snap} canEdit={canEdit && viewingSeq === undefined}
-              focusCandidateId={focusCandidate} onSelectRecord={selectRecord} />
+              focusCandidateId={focusCandidate} onSelectRecord={selectRecord}
+              canViewRuns={canEdit} onOpenRun={(runId, childRunId) => setRunFocus({ runId, childRunId })} />
           </div>
         </Drawer>
       )}
@@ -420,6 +444,8 @@ export default function ModelEditor() {
         </DropdownMenu>
       )}
 
+      <RunViewDialog path={path} focus={runFocus} canReview={canEdit} onClose={() => setRunFocus(null)} />
+
       <RegistersDialog
         open={registersOpen}
         onOpenChange={setRegistersOpen}
@@ -427,6 +453,7 @@ export default function ModelEditor() {
         canApprove={canApprove && viewingSeq === undefined}
         write={write}
         onSelectRecord={selectRecord}
+        onOpenReview={() => { setRegistersOpen(null); setDrawer("review"); }}
       />
 
       <Dialog open={sourcesOpen} onOpenChange={setSourcesOpen}>
@@ -514,13 +541,14 @@ const REGISTERS: { key: RegisterKey; label: string; count: (s: Snapshot) => numb
   { key: "checks", label: "Checks", count: (s) => s.checks.length },
 ];
 
-function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSelectRecord }: {
+function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSelectRecord, onOpenReview }: {
   open: RegisterKey | null;
   onOpenChange: (v: RegisterKey | null) => void;
   snapshot: Snapshot;
   canApprove: boolean;
   write: ReturnType<typeof useWrite>["write"];
   onSelectRecord: (id: string) => void;
+  onOpenReview: () => void;
 }) {
   return (
     <Dialog open={open !== null} onOpenChange={(o) => !o && onOpenChange(null)}>
@@ -538,7 +566,8 @@ function RegistersDialog({ open, onOpenChange, snapshot, canApprove, write, onSe
             ))}
           </TabsList>
           <div className="flex-1 min-h-0 overflow-y-auto pr-2 mt-3">
-            {open && <RegistersPanel only={open} snapshot={snapshot} canApprove={canApprove} write={write} onSelectRecord={onSelectRecord} />}
+            {open && <RegistersPanel only={open} snapshot={snapshot} canApprove={canApprove} write={write} onSelectRecord={onSelectRecord}
+              onOpenReview={onOpenReview} />}
           </div>
         </Tabs>
       </DialogContent>

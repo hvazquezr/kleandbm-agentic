@@ -1,14 +1,16 @@
 import { Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { AttributeRecord, Operation, RelationshipRecord, TableRecord } from "@/api/client";
+import type { AttributeRecord, Operation, RelationshipRecord, Schemas, TableRecord } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CARDINALITIES } from "@/lib/labels";
 import { EnumSelect, Field } from "./fields";
 import { useConfirm } from "./useConfirm";
+import { DraftNoticeBanner, useDraft } from "./useDraft";
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
+type RelationshipData = Schemas["RelationshipData"];
+const LABELS: Partial<Record<keyof RelationshipData, string>> = { role_name: "Role name" };
 
 export function RelationshipInspector({
   relationship,
@@ -27,20 +29,9 @@ export function RelationshipInspector({
 }) {
   const d = relationship.data;
   const [ask, confirmDialog] = useConfirm();
-  const [cardinality, setCardinality] = useState(d.cardinality ?? "many_to_one");
-  const [roleName, setRoleName] = useState(d.role_name ?? "");
-  const [description, setDescription] = useState(d.description ?? "");
-  useEffect(() => {
-    setCardinality(d.cardinality ?? "many_to_one");
-    setRoleName(d.role_name ?? "");
-    setDescription(d.description ?? "");
-  }, [relationship.id, relationship.seq]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const patch: Record<string, unknown> = {};
-  if (cardinality !== d.cardinality) patch.cardinality = cardinality;
-  if ((roleName || null) !== (d.role_name ?? null)) patch.role_name = roleName || null;
-  if ((description || null) !== (d.description ?? null)) patch.description = description || null;
-  const dirty = Object.keys(patch).length > 0;
+  const draft = useDraft<RelationshipData>(relationship);
+  const { form, setForm, patch, dirty } = draft;
+  const cardinality = form.cardinality ?? "many_to_one";
 
   const end = (tableId: string, attrId: string) =>
     `${tables.get(tableId)?.data.name ?? "?"}.${attributes.get(attrId)?.data.name ?? "?"}`;
@@ -48,21 +39,23 @@ export function RelationshipInspector({
   return (
     <div className="space-y-4">
       {confirmDialog}
+      <DraftNoticeBanner notice={draft.notice} labels={LABELS} noun="relationship" onUseLatest={draft.takeLatest}
+        onDiscard={draft.discard} onDismiss={draft.dismiss} />
       <div className="rounded-md border p-3 text-sm space-y-1">
         <div><span className="text-muted-foreground">From </span>{end(d.from_table_id, d.from_attribute_id)}</div>
         <div><span className="text-muted-foreground">To </span>{end(d.to_table_id, d.to_attribute_id)}</div>
       </div>
       <Field label="Cardinality (from → to)">
-        <EnumSelect value={cardinality} options={CARDINALITIES} disabled={readOnly} onChange={(v) => v && setCardinality(v)} />
+        <EnumSelect value={cardinality} options={CARDINALITIES} disabled={readOnly} onChange={(v) => v && setForm({ ...form, cardinality: v })} />
       </Field>
       {cardinality === "many_to_many" && (
         <p className="text-xs text-amber-500">Many-to-many usually calls for a bridge table in a dimensional model.</p>
       )}
       <Field label="Role name (for role-playing dimensions, e.g. Order Date)">
-        <Input className="h-8" value={roleName} disabled={readOnly} onChange={(e) => setRoleName(e.target.value)} />
+        <Input className="h-8" value={form.role_name ?? ""} disabled={readOnly} onChange={(e) => setForm({ ...form, role_name: e.target.value || null })} />
       </Field>
       <Field label="Description">
-        <Textarea rows={2} value={description} disabled={readOnly} onChange={(e) => setDescription(e.target.value)} />
+        <Textarea rows={2} value={form.description ?? ""} disabled={readOnly} onChange={(e) => setForm({ ...form, description: e.target.value || null })} />
       </Field>
       {!readOnly && (
         <div className="flex gap-2">

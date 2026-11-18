@@ -1,25 +1,20 @@
 import { ChevronDown, ChevronRight, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AttributeRecord, Operation, Schemas, TableRecord } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIVITY, ATTRIBUTE_ROLES, LOGICAL_TYPES, SCD_TYPES, TABLE_KINDS } from "@/lib/labels";
 import { EnumSelect, Field } from "./fields";
+import { DraftNoticeBanner, useDraft } from "./useDraft";
 import { useConfirm } from "./useConfirm";
 
 type Write = (ops: Operation[], o?: { reason?: string; success?: string }) => Promise<unknown>;
 type TableData = Schemas["TableData"];
 type AttributeData = Schemas["AttributeData"];
 
-/** Fields of `next` that differ from `prev`, for a minimal update patch. */
-function diff<T extends object>(prev: T, next: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const k of Object.keys(next) as (keyof T)[]) {
-    if (JSON.stringify(prev[k] ?? null) !== JSON.stringify(next[k] ?? null)) out[k] = next[k];
-  }
-  return out;
-}
+const TABLE_LABELS: Partial<Record<keyof TableData, string>> = { scd_type: "History" };
+const ATTRIBUTE_LABELS: Partial<Record<keyof AttributeData, string>> = { logical_type: "Logical type", is_nullable: "Required" };
 
 export function TableInspector({
   table,
@@ -34,13 +29,9 @@ export function TableInspector({
   write: Write;
   onDeleted: () => void;
 }) {
-  const [form, setForm] = useState<TableData>(table.data);
+  const draft = useDraft<TableData>(table);
+  const { form, setForm, patch, dirty } = draft;
   const [ask, confirmDialog] = useConfirm();
-  // Reset the form whenever a new revision of the table arrives.
-  useEffect(() => setForm(table.data), [table.id, table.seq]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const patch = diff(table.data, form);
-  const dirty = Object.keys(patch).length > 0;
   const sorted = [...attributes].sort((a, b) => a.data.ordinal - b.data.ordinal || a.data.name.localeCompare(b.data.name));
 
   const save = () =>
@@ -61,6 +52,8 @@ export function TableInspector({
     <div className="space-y-5">
       {confirmDialog}
       <section className="space-y-3">
+        <DraftNoticeBanner notice={draft.notice} labels={TABLE_LABELS} noun="table" onUseLatest={draft.takeLatest}
+          onDiscard={draft.discard} onDismiss={draft.dismiss} />
         <Field label="Name">
           <Input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} className="h-8" />
         </Field>
@@ -86,7 +79,7 @@ export function TableInspector({
             <Button size="sm" onClick={save} disabled={!dirty || !form.name.trim()}>
               <Save className="size-4" /> Save table
             </Button>
-            {dirty && <Button size="sm" variant="ghost" onClick={() => setForm(table.data)}>Discard</Button>}
+            {dirty && <Button size="sm" variant="ghost" onClick={draft.discard}>Discard</Button>}
             <Button size="sm" variant="ghost" className="ml-auto text-destructive" onClick={remove}>
               <Trash2 className="size-4" /> Delete
             </Button>
@@ -139,11 +132,9 @@ function AttributeFields({ value, onChange, readOnly }: { value: AttributeData; 
 
 function AttributeRow({ attribute, readOnly, write }: { attribute: AttributeRecord; readOnly: boolean; write: Write }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<AttributeData>(attribute.data);
+  const draft = useDraft<AttributeData>(attribute);
+  const { form, setForm, patch, dirty } = draft;
   const [ask, confirmDialog] = useConfirm();
-  useEffect(() => setForm(attribute.data), [attribute.id, attribute.seq]); // eslint-disable-line react-hooks/exhaustive-deps
-  const patch = diff(attribute.data, form);
-  const dirty = Object.keys(patch).length > 0;
 
   return (
     <div className="rounded-md border">
@@ -151,10 +142,13 @@ function AttributeRow({ attribute, readOnly, write }: { attribute: AttributeReco
       <button type="button" className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         <span className="font-medium flex-1 truncate">{attribute.data.name}</span>
+        {dirty && <span className="text-xs text-amber-600 dark:text-amber-400">unsaved</span>}
         <span className="text-xs text-muted-foreground">{attribute.data.logical_type} · {attribute.data.role?.replaceAll("_", " ")}</span>
       </button>
       {open && (
         <div className="px-3 pb-3 space-y-3">
+          <DraftNoticeBanner notice={draft.notice} labels={ATTRIBUTE_LABELS} noun="attribute" onUseLatest={draft.takeLatest}
+            onDiscard={draft.discard} onDismiss={draft.dismiss} />
           <AttributeFields value={form} onChange={setForm} readOnly={readOnly} />
           {!readOnly && (
             <div className="flex gap-2">

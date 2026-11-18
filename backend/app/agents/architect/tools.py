@@ -289,7 +289,8 @@ DECISION_POINT_SPEC = ToolSpec(
     }),
 )
 
-READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents")]
+READ_SPECS = [s for s in rt.TOOL_SPECS if s.name in ("get_registers", "list_documents", "read_document", "search_documents",
+                                                    "flag_untrusted_content")]
 QUESTION_SPEC = next(s for s in rt.TOOL_SPECS if s.name == "raise_question")
 # Only the tools that write structured content are strict: all of them together exceed the
 # provider's grammar size limit. The rest have simple inputs that the handlers validate.
@@ -853,6 +854,7 @@ HANDLERS = {
     "list_documents": rt.list_documents,
     "read_document": rt.read_document,
     "search_documents": rt.search_documents,
+    "flag_untrusted_content": rt.flag_untrusted_content,
     **SOURCE_HANDLERS,
     "get_candidate": get_candidate,
     "put_table": put_table,
@@ -870,6 +872,6 @@ OWN_TRANSACTION_TOOLS = {"ask_requirements", "open_decision_point"}
 # Committed as soon as they succeed: register changes, candidate edits and evidence.
 WRITE_TOOLS = (set(SOURCE_HANDLERS) - {"list_sources"}) | {
     "put_table", "put_relationships", "remove_element", "map_requirement",
-    "record_decision", "update_feasibility", "raise_question",
+    "record_decision", "update_feasibility", "raise_question", "flag_untrusted_content",
 }
 assert set(HANDLERS) == {s.name for s in TOOL_SPECS}

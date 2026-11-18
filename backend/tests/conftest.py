@@ -169,3 +169,14 @@ def _no_monitor_by_default(monkeypatch):
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "monitor_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _no_tracing_by_default(monkeypatch):
+    """Tests never send traces, whatever backend/.env says: a developer's LangSmith key there
+    would otherwise trace every scripted test run to their workspace. Tracing tests turn it on
+    with a fake HTTP session (tests/test_tracing.py)."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "langsmith_tracing", False)
+    monkeypatch.setattr(get_settings(), "langsmith_api_key", "")

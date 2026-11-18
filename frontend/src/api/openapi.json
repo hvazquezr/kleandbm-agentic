@@ -75,6 +75,14 @@
             "title": "Output Tokens",
             "type": "integer"
           },
+          "reviews": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AssessmentReviewOut"
+            },
+            "title": "Reviews",
+            "type": "array"
+          },
           "run_id": {
             "format": "uuid",
             "title": "Run Id",
@@ -162,6 +170,84 @@
           "ordinal"
         ],
         "title": "AssessmentRefOut",
+        "type": "object"
+      },
+      "AssessmentReviewIn": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "verdict": {
+            "enum": [
+              "concern_confirmed",
+              "false_alarm"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "AssessmentReviewIn",
+        "type": "object"
+      },
+      "AssessmentReviewOut": {
+        "properties": {
+          "by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Name"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "verdict",
+          "note",
+          "by_name",
+          "created_at"
+        ],
+        "title": "AssessmentReviewOut",
         "type": "object"
       },
       "AttributeData": {
@@ -1023,6 +1109,219 @@
           }
         },
         "title": "ConnectionUpdate",
+        "type": "object"
+      },
+      "ContentFlagOut": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Title"
+          },
+          "document_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Version Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Note"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By Name"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Table"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "agent",
+          "target_kind",
+          "document_id",
+          "document_version_id",
+          "document_title",
+          "version_no",
+          "location",
+          "source_id",
+          "source_name",
+          "source_table",
+          "source_column",
+          "quote",
+          "reason",
+          "created_at",
+          "reviewed_at",
+          "reviewed_by_name",
+          "review_note"
+        ],
+        "title": "ContentFlagOut",
+        "type": "object"
+      },
+      "ContentFlagReviewIn": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ContentFlagReviewIn",
         "type": "object"
       },
       "ConversationIn": {
@@ -4768,7 +5067,7 @@
     },
     "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments": {
       "get": {
-        "description": "The transcript monitor's assessments of a top-level run, newest first. Pending while the\nmonitor reads the run; skipped when no monitor model is configured.",
+        "description": "The transcript monitor's assessments of a top-level run, newest first. Pending while the\nmonitor reads the run; skipped when no monitor model is configured. Needs edit access.",
         "operationId": "get_run_assessments_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments_get",
         "parameters": [
           {
@@ -4834,6 +5133,95 @@
           }
         ],
         "summary": "Get Run Assessments",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments/{assessment_id}/reviews": {
+      "post": {
+        "description": "A person's verdict on a monitor assessment: was the concern real? Append-only.",
+        "operationId": "review_assessment_tenants__tenant_id__projects__project_id__agent_runs__run_id__assessments__assessment_id__reviews_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentReviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Assessment",
         "tags": [
           "conversations"
         ]
@@ -5268,6 +5656,158 @@
         ]
       }
     },
+    "/tenants/{tenant_id}/projects/{project_id}/content-flags": {
+      "get": {
+        "description": "Untrusted content agents flagged for trying to instruct them, newest first.",
+        "operationId": "list_content_flags_tenants__tenant_id__projects__project_id__content_flags_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_reviewed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Reviewed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ContentFlagOut"
+                  },
+                  "title": "Response List Content Flags Tenants  Tenant Id  Projects  Project Id  Content Flags Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Content Flags",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/content-flags/{flag_id}/review": {
+      "post": {
+        "description": "A person marks a flag reviewed. Agents can't.",
+        "operationId": "review_content_flag_tenants__tenant_id__projects__project_id__content_flags__flag_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flag_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Flag Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContentFlagReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentFlagOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Content Flag",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/tenants/{tenant_id}/projects/{project_id}/conversations": {
       "get": {
         "operationId": "list_conversations_tenants__tenant_id__projects__project_id__conversations_get",
@@ -5408,6 +5948,79 @@
           }
         ],
         "summary": "Create Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/conversations/{conversation_id}/assessments": {
+      "get": {
+        "description": "The latest assessment of each run in a conversation, to show beside its replies.",
+        "operationId": "get_conversation_assessments_tenants__tenant_id__projects__project_id__conversations__conversation_id__assessments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssessmentOut"
+                  },
+                  "title": "Response Get Conversation Assessments Tenants  Tenant Id  Projects  Project Id  Conversations  Conversation Id  Assessments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Conversation Assessments",
         "tags": [
           "conversations"
         ]

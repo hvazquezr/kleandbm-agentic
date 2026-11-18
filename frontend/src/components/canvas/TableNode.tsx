@@ -4,11 +4,15 @@ import { memo } from "react";
 import type { AttributeRecord, TableRecord } from "@/api/client";
 import { cn } from "@/lib/utils";
 
+/** Validation checks on the table or its attributes, by status (from the Validator's findings). */
+export type TableValidation = { failed: number; unverified: number; blocking: number; summaries: string[] };
+
 export type TableNodeData = {
   table: TableRecord;
   attributes: AttributeRecord[];
   highlighted?: boolean;
   connectable: boolean;
+  validation?: TableValidation;
 };
 
 export type TableFlowNode = Node<TableNodeData, "table">;
@@ -40,8 +44,20 @@ function RoleIcon({ role }: { role: AttributeRecord["data"]["role"] }) {
   }
 }
 
+/** Red for a failed check, amber for an unverified one; the tooltip lists them. */
+function ValidationDot({ validation }: { validation: TableValidation }) {
+  const failed = validation.failed > 0;
+  const parts = [failed && `${validation.failed} failed`, validation.unverified > 0 && `${validation.unverified} unverified`]
+    .filter(Boolean).join(", ");
+  const title = `Validation: ${parts}${validation.blocking ? ` (${validation.blocking} blocking)` : ""}\n${validation.summaries.join("\n")}`;
+  return (
+    <span title={title} role="img" aria-label={`Validation: ${parts}`}
+      className={cn("size-2.5 rounded-full shrink-0 ring-2 ring-card", failed ? "bg-red-500" : "bg-amber-500")} />
+  );
+}
+
 function TableNode({ data, selected }: NodeProps<TableFlowNode>) {
-  const { table, attributes, highlighted, connectable } = data;
+  const { table, attributes, highlighted, connectable, validation } = data;
   const style = KIND_STYLE[table.data.kind];
   const Icon = style.icon;
   const sorted = [...attributes].sort((a, b) => a.data.ordinal - b.data.ordinal || a.data.name.localeCompare(b.data.name));
@@ -60,6 +76,7 @@ function TableNode({ data, selected }: NodeProps<TableFlowNode>) {
         <div className="flex items-center gap-2">
           <Icon className={cn("size-5 shrink-0", style.iconColor)} />
           <div className="font-semibold truncate flex-1">{table.data.name}</div>
+          {validation && (validation.failed > 0 || validation.unverified > 0) && <ValidationDot validation={validation} />}
           <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", style.badge)}>{style.label}</span>
         </div>
         {table.data.grain && (

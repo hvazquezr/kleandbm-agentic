@@ -296,7 +296,8 @@ export function useInvalidateAfterAgent(path: ProjectPath) {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ["snapshot", "messages", "documents", "history", "impact", "versions", "candidates", "candidate"].map((k) =>
+      ["snapshot", "messages", "documents", "history", "impact", "versions", "candidates", "candidate", "content-flags",
+        "assessments"].map((k) =>
         qc.invalidateQueries({ queryKey: [k, path.project_id] }),
       ),
     );
@@ -411,5 +412,92 @@ export function useResolveDecisionPoint(path: ProjectPath) {
       qc.invalidateQueries({ queryKey: ["decision-points", path.project_id] }),
       qc.invalidateQueries({ queryKey: ["candidate", path.project_id] }),
     ]),
+  });
+}
+
+// --- Runs: transcripts, monitor assessments and flagged content ----------------------------
+
+/** A run's summary (agent, status, usage, child run ids). */
+export function useRun(path: ProjectPath, runId: string | undefined) {
+  return useQuery({
+    queryKey: ["run", path.project_id, runId ?? ""],
+    enabled: !!runId,
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}", {
+      params: { path: { ...path, run_id: runId! } },
+    })),
+  });
+}
+
+/** The run's transcript and those of the runs it started. Needs edit access. */
+export function useRunMessages(path: ProjectPath, runId: string | undefined) {
+  return useQuery({
+    queryKey: ["run-messages", path.project_id, runId ?? ""],
+    enabled: !!runId,
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/messages", {
+      params: { path: { ...path, run_id: runId! } },
+    })),
+  });
+}
+
+const pending = (rows: { status: string }[] | undefined) => rows?.some((a) => a.status === "pending");
+
+/** The monitor's assessments of one run, newest first; polls while the monitor is reading it. */
+export function useRunAssessments(path: ProjectPath, runId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["assessments", path.project_id, "run", runId ?? ""],
+    enabled: !!runId && enabled,
+    refetchInterval: (q) => (pending(q.state.data) ? 5000 : false),
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments", {
+      params: { path: { ...path, run_id: runId! } },
+    })),
+  });
+}
+
+/** The latest assessment of each run in a conversation. Polls while one is pending, or briefly
+ *  after a run (`waitFor`) whose assessment hasn't appeared yet. */
+export function useConversationAssessments(path: ProjectPath, conversationId: string | undefined, enabled = true,
+                                           waitFor?: string) {
+  return useQuery({
+    queryKey: ["assessments", path.project_id, "conversation", conversationId ?? ""],
+    enabled: !!conversationId && enabled,
+    refetchInterval: (q) =>
+      pending(q.state.data) || (waitFor && !q.state.data?.some((a) => a.run_id === waitFor)) ? 5000 : false,
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/conversations/{conversation_id}/assessments", {
+      params: { path: { ...path, conversation_id: conversationId! } },
+    })),
+  });
+}
+
+/** A person's verdict on an assessment. */
+export function useReviewAssessment(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { runId: string; assessmentId: string; verdict: "concern_confirmed" | "false_alarm"; note?: string }) =>
+      unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/agent-runs/{run_id}/assessments/{assessment_id}/reviews", {
+        params: { path: { ...path, run_id: args.runId, assessment_id: args.assessmentId } },
+        body: { verdict: args.verdict, note: args.note || null },
+      })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["assessments", path.project_id] }),
+  });
+}
+
+/** Untrusted content agents flagged for trying to instruct them (open ones unless asked). */
+export function useContentFlags(path: ProjectPath, includeReviewed = false) {
+  return useQuery({
+    queryKey: ["content-flags", path.project_id, includeReviewed],
+    queryFn: () => unwrap(api.GET("/tenants/{tenant_id}/projects/{project_id}/content-flags", {
+      params: { path, query: { include_reviewed: includeReviewed } },
+    })),
+  });
+}
+
+export function useReviewContentFlag(path: ProjectPath) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; note?: string }) =>
+      unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/content-flags/{flag_id}/review", {
+        params: { path: { ...path, flag_id: args.id } }, body: { note: args.note || null },
+      })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["content-flags", path.project_id] }),
   });
 }
