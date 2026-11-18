@@ -1,0 +1,41 @@
+{
+ "baseline": {
+  "runs": 2,
+  "completed": 2,
+  "rubric": {
+   "facts_declare_grain": 2,
+   "inventory_reruns_handled": 2,
+   "month_end_stock_feasible": 2,
+   "net_sales_feasible": 2,
+   "no_shipment_attributes_on_orders_or_lines": 2,
+   "on_time_feasible": 2,
+   "open_lines_handled": 2,
+   "shipment_grain_fact": 2,
+   "shipped_sales_feasible": 2,
+   "shipped_sales_from_shipped_quantity": 2,
+   "stock_semi_additive": 2
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.5,
+  "findings": {
+   "passed": 10.5,
+   "failed": 0.0,
+   "unverified": 3.0
+  },
+  "review_rounds": 1.0,
+  "tables": 6.5,
+  "questions": 2.5,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 479.65,
+  "model_calls": 35.0,
+  "output_tokens": 39956.0,
+  "input_tokens": 230976.0,
+  "search_output_tokens": 0.0,
+  "cost_usd": null,
+  "monitor_score": 41.5,
+  "monitor_flagged": 1,
+  "monitor_untrusted_found": 0.0
+ }
+}

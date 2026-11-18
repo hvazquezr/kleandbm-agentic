@@ -1,2 +1,6 @@
-results/
+# Run JSON holds transcripts and source samples: keep it local. Reports and summaries are published.
+results/**
+!results/*/
+!results/*/report*.md
+!results/*/summary.json
 __pycache__/

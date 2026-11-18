@@ -1,0 +1,74 @@
+{
+ "baseline": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "guest_checkouts_handled": 3,
+   "no_order_measures_on_lines": 3,
+   "order_grain_fact_for_order_measures": 3,
+   "order_value_feasible": 3,
+   "refund_rate_feasible": 3,
+   "returns_fact_separate": 3,
+   "sales_by_both_stores_feasible": 3,
+   "shipping_by_category_honest": 3,
+   "store_roles_distinguished": 3
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.33,
+  "findings": {
+   "passed": 10.67,
+   "failed": 0.0,
+   "unverified": 2.67
+  },
+  "review_rounds": 1.33,
+  "tables": 7.0,
+  "questions": 2.67,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 456.8,
+  "model_calls": 37.0,
+  "output_tokens": 40724.33,
+  "input_tokens": 233931.67,
+  "search_output_tokens": 0.0,
+  "cost_usd": null
+ },
+ "tot": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "guest_checkouts_handled": 3,
+   "no_order_measures_on_lines": 3,
+   "order_grain_fact_for_order_measures": 3,
+   "order_value_feasible": 3,
+   "refund_rate_feasible": 3,
+   "returns_fact_separate": 3,
+   "sales_by_both_stores_feasible": 3,
+   "shipping_by_category_honest": 3,
+   "store_roles_distinguished": 3
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.33,
+  "findings": {
+   "passed": 10.67,
+   "failed": 0.0,
+   "unverified": 3.0
+  },
+  "review_rounds": 1.33,
+  "tables": 7.0,
+  "questions": 2.33,
+  "decision_points": 3,
+  "search_outcomes": {
+   "failed": 3
+  },
+  "seconds": 524.17,
+  "model_calls": 37.33,
+  "output_tokens": 48946.0,
+  "input_tokens": 227393.0,
+  "search_output_tokens": 7506.67,
+  "cost_usd": null
+ }
+}

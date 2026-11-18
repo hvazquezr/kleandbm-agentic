@@ -1,0 +1,37 @@
+{
+ "tot": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "guest_checkouts_handled": 3,
+   "no_order_measures_on_lines": 3,
+   "order_grain_fact_for_order_measures": 3,
+   "order_value_feasible": 3,
+   "refund_rate_feasible": 3,
+   "returns_fact_separate": 3,
+   "sales_by_both_stores_feasible": 3,
+   "shipping_by_category_honest": 3,
+   "store_roles_distinguished": 3
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.33,
+  "findings": {
+   "passed": 10.0,
+   "failed": 0.0,
+   "unverified": 3.0
+  },
+  "review_rounds": 1.0,
+  "tables": 7.0,
+  "questions": 3.33,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 379.9,
+  "model_calls": 33.33,
+  "output_tokens": 36465.33,
+  "input_tokens": 191329.67,
+  "search_output_tokens": 0.0,
+  "cost_usd": null
+ }
+}

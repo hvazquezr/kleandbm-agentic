@@ -1,1 +1,4 @@
-results/
+# results.json holds transcript excerpts: keep it local. Reports are published.
+results/**
+!results/*/
+!results/*/report.md

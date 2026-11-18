@@ -1,0 +1,73 @@
+{
+ "baseline": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "harbor_store_question": 1,
+   "late_refunds_question": 2,
+   "net_revenue_conflict_to_user": 3,
+   "no_order_level_cost_allocation": 3,
+   "profit_by_order_honest": 3,
+   "returns_fact_separate": 3,
+   "revenue_and_returns_feasible": 3,
+   "store_day_alternative_offered": 3
+  },
+  "rubric_score": 0.89,
+  "ready_for_review": 0,
+  "blockers": 2.33,
+  "findings": {
+   "passed": 10.33,
+   "failed": 0.0,
+   "unverified": 3.0
+  },
+  "review_rounds": 1.33,
+  "tables": 5.67,
+  "questions": 3.33,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 396.3,
+  "model_calls": 33.33,
+  "output_tokens": 35308.67,
+  "input_tokens": 221568.33,
+  "search_output_tokens": 0.0,
+  "cost_usd": null
+ },
+ "tot": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "harbor_store_question": 1,
+   "late_refunds_question": 1,
+   "net_revenue_conflict_to_user": 3,
+   "no_order_level_cost_allocation": 3,
+   "profit_by_order_honest": 3,
+   "returns_fact_separate": 3,
+   "revenue_and_returns_feasible": 3,
+   "store_day_alternative_offered": 3
+  },
+  "rubric_score": 0.85,
+  "ready_for_review": 0,
+  "blockers": 1.33,
+  "findings": {
+   "passed": 10.33,
+   "failed": 0.0,
+   "unverified": 1.67
+  },
+  "review_rounds": 1.67,
+  "tables": 6.33,
+  "questions": 2.0,
+  "decision_points": 3,
+  "search_outcomes": {
+   "partial": 1,
+   "selected": 2
+  },
+  "seconds": 546.33,
+  "model_calls": 36.33,
+  "output_tokens": 49679.0,
+  "input_tokens": 274192.0,
+  "search_output_tokens": 13027.33,
+  "cost_usd": null
+ }
+}

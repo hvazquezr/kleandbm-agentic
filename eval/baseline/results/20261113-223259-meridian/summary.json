@@ -1,0 +1,74 @@
+{
+ "baseline": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "inventory_reruns_handled": 3,
+   "month_end_stock_feasible": 3,
+   "net_sales_feasible": 3,
+   "no_shipment_attributes_on_orders_or_lines": 3,
+   "on_time_feasible": 3,
+   "open_lines_handled": 3,
+   "shipment_grain_fact": 3,
+   "shipped_sales_feasible": 3,
+   "shipped_sales_from_shipped_quantity": 3,
+   "stock_semi_additive": 3
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.67,
+  "findings": {
+   "passed": 11.0,
+   "failed": 0.0,
+   "unverified": 3.67
+  },
+  "review_rounds": 1.67,
+  "tables": 7.0,
+  "questions": 3.0,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 508.07,
+  "model_calls": 42.33,
+  "output_tokens": 48694.67,
+  "input_tokens": 331675.67,
+  "search_output_tokens": 0.0,
+  "cost_usd": null
+ },
+ "tot": {
+  "runs": 3,
+  "completed": 3,
+  "rubric": {
+   "facts_declare_grain": 3,
+   "inventory_reruns_handled": 3,
+   "month_end_stock_feasible": 3,
+   "net_sales_feasible": 3,
+   "no_shipment_attributes_on_orders_or_lines": 3,
+   "on_time_feasible": 3,
+   "open_lines_handled": 3,
+   "shipment_grain_fact": 3,
+   "shipped_sales_feasible": 3,
+   "shipped_sales_from_shipped_quantity": 3,
+   "stock_semi_additive": 3
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.33,
+  "findings": {
+   "passed": 10.0,
+   "failed": 0.0,
+   "unverified": 3.33
+  },
+  "review_rounds": 1.33,
+  "tables": 7.0,
+  "questions": 2.0,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 439.33,
+  "model_calls": 33.33,
+  "output_tokens": 42101.33,
+  "input_tokens": 274659.0,
+  "search_output_tokens": 0.0,
+  "cost_usd": null
+ }
+}
