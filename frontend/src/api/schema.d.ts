@@ -369,7 +369,11 @@ export interface paths {
         /** List Messages */
         get: operations["list_messages_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_get"];
         put?: never;
-        /** Send Message */
+        /**
+         * Send Message
+         * @description Send a message and stream the reply. In an Assistant conversation the request router
+         *     picks the agent (a `route` event says which and why), unless `agent` names it.
+         */
         post: operations["send_message_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_post"];
         delete?: never;
         options?: never;
@@ -1682,6 +1686,8 @@ export interface components {
         };
         /** MessageIn */
         MessageIn: {
+            /** Agent */
+            agent?: ("business_requirements" | "architect") | null;
             /** Attachment Version Ids */
             attachment_version_ids?: string[];
             /**
@@ -1696,6 +1702,8 @@ export interface components {
             activity: {
                 [key: string]: unknown;
             }[];
+            /** Agent */
+            agent?: string | null;
             /** Attachments */
             attachments: string[];
             /**
@@ -1716,6 +1724,8 @@ export interface components {
             run_id: string | null;
             /** Text */
             text: string;
+            /** Turn Run Id */
+            turn_run_id?: string | null;
         };
         /**
          * MetricDetails
@@ -2115,6 +2125,22 @@ export interface components {
              */
             outcome: "accepted" | "rejected";
         };
+        /** RouteOut */
+        RouteOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reason */
+            reason: string;
+            /** Route */
+            route: string;
+            /** Router Model */
+            router_model: string | null;
+            /** Source */
+            source: string;
+        };
         /** RunMessageOut */
         RunMessageOut: {
             /** Agent */
@@ -2171,6 +2197,7 @@ export interface components {
             output_tokens: number;
             /** Parent Run Id */
             parent_run_id: string | null;
+            route?: components["schemas"]["RouteOut"] | null;
             /**
              * Started At
              * Format: date-time

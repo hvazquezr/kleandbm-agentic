@@ -90,6 +90,11 @@ def agent_run(run, settings=None, client=None) -> Iterator[None]:
     (tests); otherwise it comes from settings."""
     from langsmith import run_helpers as rh
 
+    if getattr(run, "parent_run_id", None) and rh.get_tracing_context().get("enabled"):
+        # An agent answering for the request router: a child of the router run's trace.
+        with child_run(run):
+            yield
+        return
     if settings is None:
         from app.config import get_settings
         settings = get_settings()

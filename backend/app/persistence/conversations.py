@@ -286,3 +286,32 @@ class ContentFlag(Base):
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column()
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_note: Mapped[str | None] = mapped_column(Text)
+
+
+class RoutingDecision(Base):
+    """Where the request router sent one user message, and why (spec §8, request router). One
+    per router run; append-only. `source` says who chose: the router's model, or the user (an
+    action with a known target, or sending a message to the other agent instead). The agent
+    runs it started are the router run's children."""
+
+    __tablename__ = "routing_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "project_id", "run_id"],
+            ["agent_runs.tenant_id", "agent_runs.project_id", "agent_runs.id"],
+            ondelete="CASCADE", name="fk_routing_decisions_run",
+        ),
+        UniqueConstraint("tenant_id", "project_id", "run_id", name="uq_routing_decisions_run"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    route: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # router | user
+    router_model: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     tot_max_seconds: int = 900
     tot_max_output_tokens: int = 80000
     agent_max_tokens: int = 16000
+    # The request router (app/agents/router): one small model call per message in an Assistant
+    # conversation, sending it to the Business Requirements agent, the Architect, or back to the
+    # user with a question. It has no tools that read or write project content.
+    router_agent_provider: str = "anthropic"  # "anthropic" | "openai" | "fake" | "none"
+    router_agent_model: str = "claude-haiku-5-5"
+    router_agent_effort: str = "low"
     # The transcript monitor (app/agents/monitor): after each top-level run, a model from another
     # family than the Architect reads the stored transcript and scores how likely it is that an
     # agent misbehaved. Triage only; a score at or above the threshold flags the run for review.

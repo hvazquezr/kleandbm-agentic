@@ -11,10 +11,16 @@ from app.domain.access import AccessDenied, ActorKind, NotFoundInScope, Permissi
 from app.domain.redaction import redact_credentials
 from app.domain.tenancy import InvalidOperation
 from app.persistence.conversations import (
-    AgentRun, AssessmentReview, Conversation, ConversationMessage, MessageRole, RunAssessment, RunMessage, RunStatus,
+    AgentRun, AssessmentReview, Conversation, ConversationMessage, MessageRole, RoutingDecision, RunAssessment, RunMessage,
+    RunStatus,
 )
 
-AGENTS = {"business_requirements": "Requirements", "architect": "Architect"}
+AGENTS = {"business_requirements": "Requirements", "architect": "Architect", "assistant": "Assistant"}
+# An Assistant conversation talks to both agents: each message gets a request router run, and the
+# agent that answers runs as its child (app/agents/router). The others talk to one agent.
+ROUTED = "assistant"
+# The agents a message may be sent to directly, skipping the router.
+TARGETS = ("business_requirements", "architect")
 
 
 def _user(scope: ProjectScope) -> uuid.UUID:
@@ -27,8 +33,8 @@ def create_conversation(
     scope.require(Permission.PROJECT_EDIT)
     if agent not in AGENTS:
         raise InvalidOperation(f"unknown agent {agent!r}")
-    if agent == "architect" and model_id is None:
-        raise InvalidOperation("an Architect conversation belongs to a data model")
+    if agent in ("architect", ROUTED) and model_id is None:
+        raise InvalidOperation(f"an {AGENTS[agent]} conversation belongs to a data model")
     if model_id is not None:
         modeling.get_model(session, scope, model_id)
     conversation = Conversation(
@@ -81,11 +87,15 @@ def start_turn(
     text: str,
     attachment_version_ids: list[uuid.UUID],
     llm_model: str,
+    target: str | None = None,
 ) -> tuple[AgentRun, bool]:
-    """Store the user's message and create the run that will answer it. Returns the run and
-    whether credentials were redacted from the message."""
+    """Store the user's message and create the run that will answer it (in an Assistant
+    conversation, the router run). `target` sends an Assistant message straight to one agent.
+    Returns the run and whether credentials were redacted from the message."""
     scope.require(Permission.PROJECT_EDIT)
     conversation = get_conversation(session, scope, conversation_id)
+    if target is not None and (conversation.agent != ROUTED or target not in TARGETS):
+        raise InvalidOperation("only an Assistant conversation sends a message to a chosen agent")
     text, redacted = redact_credentials(text)  # before it's stored or sent anywhere
     if not text.strip() and not attachment_version_ids:
         raise InvalidOperation("the message is empty")
@@ -100,7 +110,8 @@ def start_turn(
 
     run = AgentRun(
         tenant_id=scope.tenant_id, project_id=scope.project_id, conversation_id=conversation.id,
-        agent=conversation.agent, llm_model=llm_model, status=RunStatus.RUNNING, initiated_by=_user(scope),
+        agent="router" if conversation.agent == ROUTED else conversation.agent, llm_model=llm_model,
+        status=RunStatus.RUNNING, initiated_by=_user(scope),
         changeset_seqs=[],
     )
     session.add(run)
@@ -116,6 +127,21 @@ def start_turn(
     ))
     session.flush()
     return run, redacted
+
+
+def routing_decision(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> RoutingDecision | None:
+    scope.require(Permission.PROJECT_READ)
+    return session.scalar(select(RoutingDecision).where(
+        RoutingDecision.tenant_id == scope.tenant_id, RoutingDecision.project_id == scope.project_id,
+        RoutingDecision.run_id == run_id))
+
+
+def message_runs(session: Session, scope: ProjectScope, run_ids: list[uuid.UUID]) -> dict[uuid.UUID, AgentRun]:
+    """The runs that wrote a conversation's messages, by id."""
+    if not run_ids:
+        return {}
+    return {r.id: r for r in session.scalars(select(AgentRun).where(
+        AgentRun.tenant_id == scope.tenant_id, AgentRun.project_id == scope.project_id, AgentRun.id.in_(run_ids)))}
 
 
 def get_run(session: Session, scope: ProjectScope, run_id: uuid.UUID) -> AgentRun:

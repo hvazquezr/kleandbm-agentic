@@ -46,7 +46,9 @@ from app.agents.architect.tools import (
 )
 from app.agents.requirements.agent import _history
 from app.adapters import tracing
-from app.agents.runtime import Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome
+from app.agents.runtime import (
+    Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome, turn_message,
+)
 from app.agents.validator.agent import review as validator_review
 from app.domain import design, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
@@ -114,10 +116,7 @@ def run_design(
     with session_factory() as session:
         run = session.get(AgentRun, run_id)
         conversation = session.get(Conversation, run.conversation_id)
-        user_msg = session.scalar(
-            select(ConversationMessage).where(
-                ConversationMessage.conversation_id == conversation.id, ConversationMessage.run_id == run.id,
-                ConversationMessage.role == MessageRole.USER))
+        user_msg = turn_message(session, run)
         agent = Actor(kind=ActorKind.AGENT, id=run.id, on_behalf_of=run.initiated_by)
         try:
             scope = tenancy.resolve_project_scope(session, agent, tenant_id, project_id)

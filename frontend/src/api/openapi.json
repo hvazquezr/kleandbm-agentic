@@ -2238,6 +2238,21 @@
       },
       "MessageIn": {
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "business_requirements",
+                  "architect"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
           "attachment_version_ids": {
             "items": {
               "format": "uuid",
@@ -2266,6 +2281,17 @@
             },
             "title": "Activity",
             "type": "array"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
           },
           "attachments": {
             "items": {
@@ -2307,6 +2333,18 @@
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "turn_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Run Id"
           }
         },
         "required": [
@@ -3472,6 +3510,47 @@
         "title": "ResolveIn",
         "type": "object"
       },
+      "RouteOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "router_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Router Model"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "reason",
+          "source",
+          "router_model",
+          "created_at"
+        ],
+        "title": "RouteOut",
+        "type": "object"
+      },
       "RunMessageOut": {
         "properties": {
           "agent": {
@@ -3611,6 +3690,16 @@
               }
             ],
             "title": "Parent Run Id"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "started_at": {
             "format": "date-time",
@@ -6098,6 +6187,7 @@
         ]
       },
       "post": {
+        "description": "Send a message and stream the reply. In an Assistant conversation the request router\npicks the agent (a `route` event says which and why), unless `agent` names it.",
         "operationId": "send_message_tenants__tenant_id__projects__project_id__conversations__conversation_id__messages_post",
         "parameters": [
           {

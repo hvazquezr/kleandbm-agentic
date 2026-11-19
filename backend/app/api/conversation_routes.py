@@ -12,7 +12,7 @@ import queue
 import threading
 import traceback
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, Literal
 
@@ -26,6 +26,7 @@ from app.agents.architect import search
 from app.agents.architect.agent import run_design
 from app.agents.monitor.monitor import monitor_run
 from app.agents.requirements.agent import run_turn
+from app.agents.router.agent import Runner, route_turn
 from app.api.source_routes import get_box
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.config import get_settings
@@ -69,6 +70,9 @@ class ConversationOut(BaseModel):
 class MessageIn(BaseModel):
     text: str = Field(default="", max_length=20_000)
     attachment_version_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    # Assistant conversations only: send the message straight to this agent instead of letting
+    # the request router choose (an action with a known target, or "send to the other agent").
+    agent: Literal["business_requirements", "architect"] | None = None
 
 
 class MessageOut(BaseModel):
@@ -79,6 +83,20 @@ class MessageOut(BaseModel):
     attachments: list[str]
     activity: list[dict[str, Any]]
     run_id: uuid.UUID | None
+    # The agent that wrote an assistant message (business_requirements, architect, or router
+    # for a question back); None for the user's messages.
+    agent: str | None = None
+    # The top-level run of the turn: the router run in an Assistant conversation, else run_id.
+    # Monitor assessments are keyed by it.
+    turn_run_id: uuid.UUID | None = None
+    created_at: datetime
+
+
+class RouteOut(BaseModel):
+    route: str  # requirements | architect | requirements_then_architect | clarify
+    reason: str
+    source: str  # router | user
+    router_model: str | None
     created_at: datetime
 
 
@@ -101,6 +119,8 @@ class RunOut(BaseModel):
     changeset_seqs: list[int]
     started_at: datetime
     finished_at: datetime | None
+    # For a router run: where it sent the message and why.
+    route: RouteOut | None = None
 
 
 class AssessmentRefOut(BaseModel):
@@ -206,11 +226,17 @@ def list_conversations(session: SessionDep, scope: ProjectScopeDep, model_id: uu
 
 @router.get("/conversations/{conversation_id}/messages")
 def list_messages(conversation_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[MessageOut]:
-    return [
-        MessageOut(id=m.id, ordinal=m.ordinal, role=str(m.role), text=m.text, attachments=list(m.attachments or []),
-                   activity=list(m.activity or []), run_id=m.run_id, created_at=m.created_at)
-        for m in conversations.list_messages(session, scope, conversation_id)
-    ]
+    messages = conversations.list_messages(session, scope, conversation_id)
+    runs = conversations.message_runs(session, scope, [m.run_id for m in messages if m.run_id])
+    out = []
+    for m in messages:
+        r = runs.get(m.run_id)
+        out.append(MessageOut(
+            id=m.id, ordinal=m.ordinal, role=str(m.role), text=m.text, attachments=list(m.attachments or []),
+            activity=list(m.activity or []), run_id=m.run_id,
+            agent=r.agent if r and str(m.role) == "assistant" else None,
+            turn_run_id=(r.parent_run_id or r.id) if r else None, created_at=m.created_at))
+    return out
 
 
 @router.get("/agent-runs/{run_id}")
@@ -222,81 +248,112 @@ def get_run(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> R
         iterations=r.iterations, tool_calls=r.tool_calls, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
         cache_read_tokens=r.cache_read_tokens, cache_write_tokens=r.cache_write_tokens,
         changeset_seqs=list(r.changeset_seqs or []), started_at=r.started_at, finished_at=r.finished_at,
+        route=RouteOut(route=d.route, reason=d.reason, source=d.source, router_model=d.router_model,
+                       created_at=d.created_at) if (d := conversations.routing_decision(session, scope, r.id)) else None,
     )
+
+
+def _runners(app_state, settings, tenant_id: uuid.UUID, project_id: uuid.UUID) -> Callable[[str], Runner]:
+    """Builds the runner for an agent. Building its model raises LLMError when it isn't
+    configured; the Architect's helpers (Business Requirements consultations, the Validator)
+    degrade instead, as the Architect expects."""
+    factory = app_state.chat_model_factory
+
+    def build(agent: str) -> Runner:
+        chat_model = factory(agent)
+        if agent != "architect":
+            def run_requirements(run_id: uuid.UUID, emit) -> None:
+                run_turn(
+                    app_state.session_factory, tenant_id=tenant_id, project_id=project_id,
+                    run_id=run_id, chat_model=chat_model, embedder=app_state.embedder,
+                    max_iterations=settings.agent_max_iterations, emit=emit, checkpointer=_checkpointer(app_state),
+                    store=app_state.object_store,
+                )
+            return Runner(chat_model.model, run_requirements)
+
+        box = get_box() if settings.secrets_key else None
+        try:  # drives the Business Requirements subgraph behind ask_requirements
+            requirements_model = factory("business_requirements")
+        except LLMError:
+            requirements_model = None
+        validator_model = validator_unavailable = None
+        try:  # the Validator reviews the candidate on a different model family
+            validator_model = factory("validator")
+        except LLMError as exc:
+            validator_unavailable = str(exc)
+
+        def run_architect(run_id: uuid.UUID, emit) -> None:
+            run_design(
+                app_state.session_factory, tenant_id=tenant_id, project_id=project_id,
+                run_id=run_id, chat_model=chat_model, embedder=app_state.embedder,
+                max_iterations=settings.architect_max_iterations, emit=emit,
+                connector=app_state.source_connector, box=box,
+                checkpointer=_checkpointer(app_state), store=app_state.object_store,
+                requirements_model=requirements_model, max_consultations=settings.architect_max_consultations,
+                consultation_max_iterations=settings.consultation_max_iterations,
+                validator_model=validator_model, validator_unavailable=validator_unavailable,
+                validator_max_iterations=settings.validator_max_iterations,
+                max_rounds=settings.validator_max_rounds, max_attempts=settings.validator_max_attempts_per_issue,
+                tot=search.Settings(
+                    children=settings.tot_children, beam=settings.tot_beam, threshold=settings.tot_score_threshold,
+                    max_model_calls=settings.tot_max_model_calls, max_tool_calls=settings.tot_max_tool_calls,
+                    max_seconds=settings.tot_max_seconds, max_output_tokens=settings.tot_max_output_tokens,
+                ) if settings.architect_tot_enabled else None,
+                max_decision_points=settings.architect_max_decision_points,
+            )
+        return Runner(chat_model.model, run_architect)
+
+    return build
 
 
 @router.post("/conversations/{conversation_id}/messages", response_class=StreamingResponse)
 def send_message(
     conversation_id: uuid.UUID, body: MessageIn, request: Request, session: SessionDep, scope: ProjectScopeDep
 ) -> StreamingResponse:
+    """Send a message and stream the reply. In an Assistant conversation the request router
+    picks the agent (a `route` event says which and why), unless `agent` names it."""
     settings = get_settings()
     conversation = conversations.get_conversation(session, scope, conversation_id)
+    app_state = request.app.state
+    runners = _runners(app_state, settings, scope.tenant_id, scope.project_id)
+    routed = conversation.agent == conversations.ROUTED
     # Build the model before storing anything, so a missing key fails the request cleanly.
     try:
-        chat_model = request.app.state.chat_model_factory(conversation.agent)
+        if routed:
+            runner = None
+            chat_model = None if body.agent else app_state.chat_model_factory("router")
+            llm_model = chat_model.model if chat_model else "none (sent to a chosen agent)"
+        else:
+            runner = runners(conversation.agent)
+            llm_model = runner.model
     except LLMError as exc:
         from app.domain.tenancy import InvalidOperation
 
         raise InvalidOperation(str(exc)) from exc
     run, redacted = conversations.start_turn(
         session, scope, conversation_id, text=body.text,
-        attachment_version_ids=body.attachment_version_ids, llm_model=chat_model.model,
+        attachment_version_ids=body.attachment_version_ids, llm_model=llm_model, target=body.agent,
     )
     session.commit()  # the run and user message must exist before the worker reads them
 
     events: queue.Queue = queue.Queue()
-    app_state = request.app.state
     tenant_id, project_id, run_id = scope.tenant_id, scope.project_id, run.id
-
-    agent = conversation.agent
-    box = get_box() if agent == "architect" and settings.secrets_key else None
-    requirements_model = validator_model = validator_unavailable = None
-    if agent == "architect":
-        factory = request.app.state.chat_model_factory
-        try:  # drives the Business Requirements subgraph behind ask_requirements
-            requirements_model = factory("business_requirements")
-        except LLMError:
-            requirements_model = None
-        try:  # the Validator reviews the candidate on a different model family
-            validator_model = factory("validator")
-        except LLMError as exc:
-            validator_unavailable = str(exc)
 
     monitor_model = monitor_unavailable = None
     if settings.monitor_enabled:
         try:  # reads the finished run's transcript; another model family than the Architect
-            monitor_model = request.app.state.chat_model_factory("monitor")
+            monitor_model = app_state.chat_model_factory("monitor")
         except LLMError as exc:
             monitor_unavailable = str(exc)
 
     def worker() -> None:
         try:
-            if agent == "architect":
-                run_design(
-                    app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
-                    chat_model=chat_model, embedder=app_state.embedder,
-                    max_iterations=settings.architect_max_iterations, emit=events.put,
-                    connector=app_state.source_connector, box=box,
-                    checkpointer=_checkpointer(app_state), store=app_state.object_store,
-                    requirements_model=requirements_model, max_consultations=settings.architect_max_consultations,
-                    consultation_max_iterations=settings.consultation_max_iterations,
-                    validator_model=validator_model, validator_unavailable=validator_unavailable,
-                    validator_max_iterations=settings.validator_max_iterations,
-                    max_rounds=settings.validator_max_rounds, max_attempts=settings.validator_max_attempts_per_issue,
-                    tot=search.Settings(
-                        children=settings.tot_children, beam=settings.tot_beam, threshold=settings.tot_score_threshold,
-                        max_model_calls=settings.tot_max_model_calls, max_tool_calls=settings.tot_max_tool_calls,
-                        max_seconds=settings.tot_max_seconds, max_output_tokens=settings.tot_max_output_tokens,
-                    ) if settings.architect_tot_enabled else None,
-                    max_decision_points=settings.architect_max_decision_points,
-                )
+            if routed:
+                route_turn(app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
+                           chat_model=chat_model, target=body.agent, runners=runners, emit=events.put)
             else:
-                run_turn(
-                    app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
-                    chat_model=chat_model, embedder=app_state.embedder, max_iterations=settings.agent_max_iterations,
-                    emit=events.put, checkpointer=_checkpointer(app_state), store=app_state.object_store,
-                )
-        except Exception as exc:  # run_turn records its own outcomes; this catches setup failures
+                runner.run(run_id, events.put)
+        except Exception as exc:  # the runs record their own outcomes; this catches setup failures
             traceback.print_exc()
             _mark_failed(app_state.session_factory, run_id, f"the agent could not start ({type(exc).__name__})")
             events.put({"type": "done", "status": "failed", "detail": "the agent could not start",

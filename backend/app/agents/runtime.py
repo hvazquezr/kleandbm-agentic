@@ -192,6 +192,15 @@ def run_config(run: AgentRun, recursion_limit: int) -> dict[str, Any]:
                          "initiated_by": str(run.initiated_by)}}
 
 
+def turn_message(session: Session, run: AgentRun) -> ConversationMessage | None:
+    """The user message a run answers. In an Assistant conversation the message belongs to the
+    router run, and the agent answering it is that run's child."""
+    owners = [run.id] + ([run.parent_run_id] if run.parent_run_id else [])
+    return session.scalar(select(ConversationMessage).where(
+        ConversationMessage.conversation_id == run.conversation_id, ConversationMessage.run_id.in_(owners),
+        ConversationMessage.role == MessageRole.USER).order_by(ConversationMessage.ordinal.desc()).limit(1))
+
+
 def last_text(transcript: list[dict[str, Any]]) -> str:
     return next((t["text"] for t in reversed(transcript) if t["role"] == "assistant" and t.get("text")), "")
 
