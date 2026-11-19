@@ -1,0 +1,56 @@
+{
+ "model": "claude-haiku-5-5",
+ "cases": 50,
+ "repeats": 3,
+ "calls": 150,
+ "accuracy": 88.7,
+ "strict_accuracy": 88.7,
+ "by_expected_route": {
+  "architect": {
+   "calls": 54,
+   "accuracy": 83.3
+  },
+  "clarify": {
+   "calls": 18,
+   "accuracy": 100.0
+  },
+  "requirements": {
+   "calls": 48,
+   "accuracy": 85.4
+  },
+  "requirements_then_architect": {
+   "calls": 30,
+   "accuracy": 96.7
+  }
+ },
+ "confusion": {
+  "architect": {
+   "architect": 45,
+   "requirements_then_architect": 9
+  },
+  "clarify": {
+   "clarify": 18
+  },
+  "requirements": {
+   "requirements_then_architect": 7,
+   "requirements": 41
+  },
+  "requirements_then_architect": {
+   "requirements_then_architect": 29,
+   "requirements": 1
+  }
+ },
+ "consistent_cases": 92.0,
+ "fallbacks": 0,
+ "errors": 0,
+ "seconds": {
+  "median": 1.12,
+  "p95": 2.38,
+  "max": 3.15
+ },
+ "tokens": {
+  "input_tokens": 600,
+  "output_tokens": 32471,
+  "cache_read_tokens": 117970
+ }
+}

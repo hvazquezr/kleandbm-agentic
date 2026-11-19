@@ -112,14 +112,24 @@ def project_state(session: Session, scope, model_id: uuid.UUID) -> str:
         DesignCandidate.tenant_id == scope.tenant_id, DesignCandidate.project_id == scope.project_id,
         DesignCandidate.model_id == model_id, DesignCandidate.status == CandidateStatus.PROPOSED).limit(1))
     linked = [c for c in sources.model_sources(session, scope, model_id) if not c.disabled_at]
+    return format_state(
+        model_name=model.name if model else "unknown", tables=len(tables), requirements=len(reqs),
+        definitions=len(defs), unconfirmed=unconfirmed, open_questions=len(questions),
+        blocking=sum(1 for q in questions if q.data.get("is_blocking")), proposal=bool(proposed),
+        sources=len(linked))
+
+
+def format_state(*, model_name: str, tables: int, requirements: int, definitions: int, unconfirmed: int,
+                 open_questions: int, blocking: int, proposal: bool, sources: int) -> str:
+    """The project summary the router reads (shared with eval/routing, so its briefs match)."""
     return "\n".join([
-        f"Data model: {_clip(model.name, 120) if model else 'unknown'}",
-        f"Model tables: {len(tables)}" + (" (empty model)" if not tables else ""),
-        f"Requirements: {len(reqs)}",
-        f"Business definitions: {len(defs)} ({unconfirmed} unconfirmed)",
-        f"Open questions: {len(questions)} ({sum(1 for q in questions if q.data.get('is_blocking'))} blocking)",
-        f"Design proposal awaiting review: {'yes' if proposed else 'no'}",
-        f"Linked data sources: {len(linked)}",
+        f"Data model: {_clip(model_name, 120)}",
+        f"Model tables: {tables}" + (" (empty model)" if not tables else ""),
+        f"Requirements: {requirements}",
+        f"Business definitions: {definitions} ({unconfirmed} unconfirmed)",
+        f"Open questions: {open_questions} ({blocking} blocking)",
+        f"Design proposal awaiting review: {'yes' if proposal else 'no'}",
+        f"Linked data sources: {sources}",
     ])
 
 
@@ -138,11 +148,15 @@ def _earlier_turns(session: Session, conversation_id: uuid.UUID, before: int) ->
         if m.role is MessageRole.ASSISTANT:
             answered_by = answered_by or AGENT_LABELS.get(agents.get(m.run_id), "the assistant (a question back)")
             continue
-        lines.append(f"- User: {_clip(m.text, 400)} → answered by {answered_by or 'nobody yet'}")
+        lines.append(earlier_line(m.text, answered_by))
         answered_by = None
         if len(lines) == HISTORY_TURNS:
             break
     return list(reversed(lines))
+
+
+def earlier_line(text: str, answered_by: str | None) -> str:
+    return f"- User: {_clip(text, 400)} → answered by {answered_by or 'nobody yet'}"
 
 
 def brief(state: str, earlier: list[str], message: str) -> str:
@@ -154,25 +168,38 @@ def brief(state: str, earlier: list[str], message: str) -> str:
 
 
 def decide(chat_model: ChatModel, run: AgentRun, session: Session, user_brief: str) -> tuple[dict[str, Any], Usage]:
-    """One model call. Returns the validated tool input (or a clarify fallback) and usage."""
-    transcript = [{"role": "user", "text": user_brief}]
+    """One model call, with its transcript recorded on the run. Returns the validated tool
+    input (or a clarify fallback) and usage."""
     recorder = RunTranscript(session, run)
     recorder.system(SYSTEM_PROMPT)
-    recorder.add(transcript)
+    recorder.add([{"role": "user", "text": user_brief}])
     session.commit()
-    turn = traced_complete(chat_model, SYSTEM_PROMPT, transcript, [ROUTE_SPEC], name="router model")
+    decision, turn = route_call(chat_model, user_brief)
     RunTranscript(session, run).add([turn.to_transcript()], stop_reason=turn.stop_reason, model=turn.model)
     run.iterations = 1
     session.commit()
+    return decision, turn.usage
+
+
+def route_call(chat_model: ChatModel, user_brief: str):
+    """The router's model call and the checks on its answer, without any bookkeeping (eval/routing
+    calls this). Returns the decision and the model turn."""
+    transcript = [{"role": "user", "text": user_brief}]
+    turn = traced_complete(chat_model, SYSTEM_PROMPT, transcript, [ROUTE_SPEC], name="router model")
+    return parse_route(turn), turn
+
+
+def parse_route(turn) -> dict[str, Any]:
+    """The validated route_request input, or a clarify fallback when the model gave none."""
     call = next((c for c in turn.tool_calls if c.name == ROUTE_SPEC.name), None)
     args = call.input if call else {}
     route = args.get("route")
     reason = (args.get("reason") or "").strip()
     if route not in ROUTES or not reason:
         return {"route": "clarify", "reason": "The router couldn't tell which agent this is for.",
-                "question": FALLBACK_QUESTION}, turn.usage
+                "question": FALLBACK_QUESTION, "fallback": True}
     question = (args.get("question") or "").strip() or (FALLBACK_QUESTION if route == "clarify" else None)
-    return {"route": route, "reason": _clip(reason, 400), "question": question}, turn.usage
+    return {"route": route, "reason": _clip(reason, 400), "question": question}
 
 
 def _close(session: Session, run: AgentRun, status: RunStatus, detail: str | None) -> None:
