@@ -1,4 +1,8 @@
-"""Request router accuracy on the labelled set in cases.json.
+"""Router accuracy on the labelled set in cases.json, or on the held-out set:
+
+    conda run -n kleandbm-agentic python eval/routing/run.py --cases eval/routing/cases_holdout.json --repeats 3
+
+Other uses:
 
     conda run -n kleandbm-agentic python eval/routing/run.py              # one pass, live
     conda run -n kleandbm-agentic python eval/routing/run.py --repeats 3  # consistency too
@@ -19,6 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BACKEND = HERE.parents[1] / "backend"
+STARTED_IN = Path.cwd()  # relative paths on the command line mean this directory
 sys.path[:0] = [str(HERE), str(BACKEND)]
 os.chdir(BACKEND)  # settings read backend/.env
 
@@ -34,7 +39,7 @@ def main() -> int:
     import routing_eval
 
     if args.rereport:
-        folder = args.rereport.resolve()
+        folder = (STARTED_IN / args.rereport).resolve()
         results = json.loads((folder / "results.json").read_text())
         summary = routing_eval.summarize(results)
         (folder / "summary.json").write_text(json.dumps(summary, indent=1))
@@ -42,7 +47,7 @@ def main() -> int:
         print(f"Rewrote {folder / 'report.md'}")
         return 0
 
-    data = routing_eval.load(args.cases.resolve() if args.cases else routing_eval.CASES)
+    data = routing_eval.load((STARTED_IN / args.cases).resolve() if args.cases else routing_eval.CASES)
     routes = sorted({c["expect"][0] for c in data["cases"]})
     print(f"{len(data['cases'])} cases, intended routes: "
           + ", ".join(f"{r} {sum(c['expect'][0] == r for c in data['cases'])}" for r in routes))

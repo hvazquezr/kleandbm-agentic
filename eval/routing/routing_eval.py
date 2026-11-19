@@ -114,7 +114,7 @@ def summarize(results: list[dict[str, Any]], model_name: str | None = None) -> d
 def report(summary: dict[str, Any], results: list[dict[str, Any]]) -> str:
     s = summary
     lines = [
-        "# Request router accuracy", "",
+        "# Router accuracy", "",
         f"Model `{s['model']}` · {s['cases']} cases × {s['repeats']} repeat(s) = {s['calls']} calls.", "",
         f"- **Accuracy:** {s['accuracy']}% (a route the case accepts); strict {s['strict_accuracy']}% (the intended route).",
     ]

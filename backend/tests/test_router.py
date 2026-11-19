@@ -264,7 +264,7 @@ def _turns(model, call=-1):
 
 
 def test_each_agent_sees_its_own_replies_in_full_and_the_others_summarized(proj):
-    long_reply = "Recorded Q-001 about vendors. " + "Detail from the notes. " * 60
+    long_reply = "Recorded Q-001 about vendors. " + "Detail from the notes. " * 200
     conv, models = assistant(
         proj,
         [route("requirements"), route("architect", "It asks for the model."), route("requirements", "A definition.")],
@@ -278,7 +278,7 @@ def test_each_agent_sees_its_own_replies_in_full_and_the_others_summarized(proj)
     arch_history = _turns(models["architect"], 0)[:-1]
     [summary] = [t["text"] for t in arch_history if t["role"] == "assistant"]
     assert summary.startswith("[The Business Requirements agent answered this message.")
-    assert "added Q-001" in summary and summary.count("Detail from the notes.") < 20
+    assert "added Q-001" in summary and summary.count("Detail from the notes.") < 30
 
     # The Requirements agent saw its own reply in full and the Architect's summarized, with the
     # Architect's deterministic change note.
@@ -365,3 +365,21 @@ def test_messages_carry_their_route_and_an_override_is_recorded(proj):
     no_target = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages",
                                 json={"text": "x", "instead_of_run_id": first[0]["run_id"]})
     assert no_target.status_code == 409
+
+
+def test_a_long_reply_summary_keeps_its_opening_questions_and_ending():
+    from app.agents.runtime import reply_summary
+    from app.persistence.conversations import ConversationMessage
+
+    body = ("Recorded the vendor requirement. " + "Background detail. " * 60
+            + "1. Which vendor details do reports need? " + "More detail. " * 40
+            + "2. Who maintains the vendor table? " + "Closing detail. " * 30 + "Tell me what you have in mind.")
+    summary = reply_summary(ConversationMessage(text=body, activity=[]), "business_requirements")
+    assert summary.startswith("[The Business Requirements agent answered this message.")
+    assert 'Its reply began: "Recorded the vendor requirement.' in summary
+    assert '"Which vendor details do reports need?"' in summary and '"Who maintains the vendor table?"' in summary
+    assert summary.rstrip().endswith('Tell me what you have in mind."')
+    assert summary.count("Background detail.") < 20 and len(summary) < len(body) / 2
+
+    short = reply_summary(ConversationMessage(text="Done. Anything else?", activity=[]), "architect")
+    assert 'Its reply: "Done. Anything else?"' in short

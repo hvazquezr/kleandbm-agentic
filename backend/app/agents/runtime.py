@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -211,10 +212,48 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+SUMMARY_OPENING = 300
+SUMMARY_QUESTIONS = 900
+SUMMARY_ENDING = 300
+_SENTENCE = re.compile(r"(?<=[.?!:])\s+(?=\S)|\s+(?=\d+[.)]\s|[-*•]\s)")
+
+
+def _questions(text: str, budget: int, *, skip: str = "") -> list[str]:
+    """The sentences of `text` that end in a question mark, in order, within `budget` characters:
+    what a reply asked the user, which the other agent needs when the user answers it. Sentences
+    already in `skip` (the ending, shown anyway) are left out."""
+    found: list[str] = []
+    used = 0
+    for sentence in _SENTENCE.split(text):
+        sentence = sentence.strip()
+        if not sentence.endswith("?") or sentence in found or sentence in skip:
+            continue
+        if used + len(sentence) > budget:
+            continue
+        found.append(sentence)
+        used += len(sentence) + 1
+    return found
+
+
+def _opening_and_ending(text: str) -> list[str]:
+    text = " ".join(text.split())
+    if len(text) <= SUMMARY_OPENING + SUMMARY_QUESTIONS + SUMMARY_ENDING:
+        return [f"Its reply: \"{text}\""]
+    opening, ending = text[:SUMMARY_OPENING - 1], text[-(SUMMARY_ENDING - 1):]
+    parts = [f"Its reply began: \"{opening}…\""]
+    # Sentences after the opening, so one cut by the ending's start is still whole here.
+    if questions := _questions(text[SUMMARY_OPENING - 1:], SUMMARY_QUESTIONS, skip=ending):
+        parts.append("Questions it asked further on: " + " ".join(f"\"{q}\"" for q in questions))
+    parts.append(f"Its reply ended: \"…{ending}\"")
+    return parts
+
+
 def reply_summary(message: ConversationMessage, agent: str) -> str:
     """Another agent's reply, shortened for this agent's history: who wrote it, the records its
-    tools changed, its opening, and the Architect's deterministic change note. Never the whole
-    text, so neither agent's context fills with the other's work."""
+    tools changed, its opening and its ending, and the Architect's deterministic change note.
+    Never the whole of a long reply, so neither agent's context fills with the other's work. The
+    ending is kept because that's where replies ask the user things: in stored replies, every
+    question to the user came after the first 300 characters, mostly in the last few hundred."""
     by_action: dict[str, list[str]] = {}
     for item in message.activity or []:
         record = item.get("record") if item.get("ok") else None
@@ -225,8 +264,8 @@ def reply_summary(message: ConversationMessage, agent: str) -> str:
     text = message.text or ""
     head, marker, changes = text.partition(CHANGES_MARKER)
     parts = [f"[The {AGENT_LABELS.get(agent, agent)} answered this message. Summary written by the "
-             f"application; the full reply isn't shown.]",
-             f"Its reply began: \"{_clip(head, 300)}\""]
+             f"application: a long reply is cut between its opening and its ending.]",
+             *_opening_and_ending(head)]
     if by_action:
         parts.append("Register entries its tools changed: "
                      + "; ".join(f"{action} {', '.join(codes)}" for action, codes in by_action.items()) + ".")
