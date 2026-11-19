@@ -2566,6 +2566,8 @@ export interface components {
             id: string;
             /** Notes */
             notes: string[];
+            /** Personal Data Masked */
+            personal_data_masked: number | null;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */

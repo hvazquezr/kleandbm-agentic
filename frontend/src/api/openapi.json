@@ -4735,6 +4735,17 @@
             "title": "Notes",
             "type": "array"
           },
+          "personal_data_masked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personal Data Masked"
+          },
           "sha256": {
             "title": "Sha256",
             "type": "string"
@@ -4783,6 +4794,7 @@
           "status_detail",
           "notes",
           "embedding_model",
+          "personal_data_masked",
           "uploaded_by",
           "uploaded_at"
         ],

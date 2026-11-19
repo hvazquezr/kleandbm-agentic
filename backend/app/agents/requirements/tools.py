@@ -311,6 +311,10 @@ def view_image(ctx: ToolContext, args: dict) -> dict:
         raise ToolInputError("no such document version in this project") from None
     if version.content_type not in IMAGE_TYPES:
         raise ToolInputError("that document isn't an image; use read_document instead")
+    if version.personal_data_masked:
+        # The transcription is masked; the pixels can't be. Don't send them to the model again.
+        raise ToolInputError("this image shows personal data, so it isn't sent to the model again; "
+                             "read its masked transcription with read_document instead")
     try:
         image = prepare_image(data)
     except VisionError as exc:

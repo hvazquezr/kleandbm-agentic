@@ -61,6 +61,7 @@ def test_masking_keeps_null_and_leaves_other_columns_alone():
     ("SSN 078-05-1120 on file", "SSN [masked government_id] on file"),
     ("IBAN GB82 WEST 1234 5698 7654 32", "IBAN [masked payment]"),
     ("tel 415.555.0134", "tel [masked phone]"),
+    ("Questions go to +1 (415) 555-0134.", "Questions go to [masked phone]."),  # ends a sentence
 ])
 def test_personal_data_in_text_is_masked(text, expected):
     assert mask_text(text)[0] == expected
@@ -70,6 +71,7 @@ def test_personal_data_in_text_is_masked(text, expected):
     "2026-07-01", "2026-07-01T23:30:00", "2026-07-01 23:30:00", "514748.44", "MS-500001", "C000123",
     "3671d132-c57b-4bce-8019-8d0d51f34fe2", "1234567890123456",  # 16 digits failing Luhn: an id, not a card
     "recount after cycle-count correction", "quantity × (unit_price − discount_per_unit)", "v1 lines 8-12",
+    "host 10.20.300.4000.5", "1200 3400 5600.75",  # dots that continue a number aren't a sentence end
 ])
 def test_ordinary_values_are_not_masked(text):
     assert mask_text(text) == (text, 0)

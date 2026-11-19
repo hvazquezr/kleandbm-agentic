@@ -51,6 +51,7 @@ class VersionOut(BaseModel):
     status_detail: str | None
     notes: list[str]
     embedding_model: str | None
+    personal_data_masked: int | None  # None: processed before masking; reprocess it
     uploaded_by: uuid.UUID
     uploaded_at: datetime
 
@@ -91,7 +92,8 @@ def _version_out(v: DocumentVersion) -> VersionOut:
     return VersionOut(
         id=v.id, version_no=v.version_no, filename=v.filename, content_type=v.content_type,
         size_bytes=v.size_bytes, sha256=v.sha256, status=v.status, status_detail=v.status_detail,
-        notes=list(v.notes or []), embedding_model=v.embedding_model, uploaded_by=v.uploaded_by,
+        notes=list(v.notes or []), embedding_model=v.embedding_model,
+        personal_data_masked=v.personal_data_masked, uploaded_by=v.uploaded_by,
         uploaded_at=v.uploaded_at,
     )
 

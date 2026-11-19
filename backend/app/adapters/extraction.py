@@ -9,6 +9,12 @@ locations for traceability):
 - text:  {"lines": [first, last], "char_start": i, "char_end": j}
 
 Extracted text is untrusted data. Callers must never treat it as instructions.
+
+Tables mask personal-data columns whole (`personal_data.column_kind`, the source rules applied
+to headers): a CSV, a Word table, or a spreadsheet region whose header names an email, phone,
+person's name and so on, or a bare name or location in a table about people (a "Customers"
+sheet). Values in other text are masked by the caller (`documents._process`, `mask_text`).
+`ExtractionResult.masked` counts the cells masked here.
 """
 
 import csv
@@ -17,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any
+
+from app.adapters.personal_data import column_kind, marker
 
 TARGET_CHARS = 1200  # soft passage size; a single long unit may exceed it
 
@@ -58,6 +66,11 @@ class Passage:
 class ExtractionResult:
     passages: list[Passage] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    masked: int = 0  # table cells masked as personal data
+
+
+def _header_kinds(table: str, headers: list[str]) -> list[str | None]:
+    return [column_kind(table, h) if h and h.strip() else None for h in headers]
 
 
 def content_type_for(filename: str, declared: str | None) -> str:
@@ -66,14 +79,18 @@ def content_type_for(filename: str, declared: str | None) -> str:
     return EXTENSION_TYPES.get(ext) or (declared or "application/octet-stream").split(";")[0].strip()
 
 
-def extract(content: bytes, content_type: str) -> ExtractionResult:
+def extract(content: bytes, content_type: str, name: str = "") -> ExtractionResult:
+    """`name` (the file's name, display only) stands for the table name of CSV and Word tables,
+    so "customers.csv" is a table about people."""
     kind = SUPPORTED_TYPES.get(content_type)
     if kind is None:
         if content_type in STORED_ONLY_TYPES:
             return ExtractionResult(notes=["Image stored; text extraction for images is not supported yet."])
         raise ExtractionError(f"unsupported content type {content_type}")
     try:
-        return {"pdf": _pdf, "docx": _docx, "xlsx": _xlsx, "csv": _csv, "text": _text}[kind](content)
+        if kind in ("docx", "csv"):
+            return {"docx": _docx, "csv": _csv}[kind](content, name.rsplit(".", 1)[0])
+        return {"pdf": _pdf, "xlsx": _xlsx, "text": _text}[kind](content)
     except ExtractionError:
         raise
     except Exception as exc:  # malformed files from users must not crash the upload
@@ -143,7 +160,7 @@ def _pdf(content: bytes) -> ExtractionResult:
     return result
 
 
-def _docx(content: bytes) -> ExtractionResult:
+def _docx(content: bytes, name: str = "") -> ExtractionResult:
     import docx
 
     document = docx.Document(io.BytesIO(content))
@@ -156,10 +173,14 @@ def _docx(content: bytes) -> ExtractionResult:
     for text, keys in _chunk_units(paragraphs):
         result.passages.append(Passage(text, {"paragraphs": [keys[0], keys[-1]]}))
     for t_index, table in enumerate(document.tables, start=1):
-        rows = [
-            (" | ".join(cell.text.strip() for cell in row.cells), r_index)
-            for r_index, row in enumerate(table.rows, start=1)
-        ]
+        grid = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        kinds = _header_kinds(name, grid[0]) if grid else []
+        for row in grid[1:]:
+            for c, kind in enumerate(kinds[:len(row)]):
+                if kind and row[c]:
+                    row[c] = marker(kind)
+                    result.masked += 1
+        rows = [(" | ".join(row), r_index) for r_index, row in enumerate(grid, start=1)]
         for text, keys in _chunk_units([r for r in rows if r[0].replace("|", "").strip()]):
             result.passages.append(Passage(text, {"table": t_index, "rows": [keys[0], keys[-1]]}))
     return result
@@ -218,6 +239,7 @@ def _xlsx(content: bytes) -> ExtractionResult:
         # 1. Regions: runs of non-empty rows. Blank rows separate tables and note blocks.
         regions: list[_Region] = []
         current: _Region | None = None
+        raw: list[list[list[tuple[Any, str, bool]]]] = []  # per region: rows of (cell, text, is_value)
         for row in ws.iter_rows():
             cells = []
             for cell in row:
@@ -226,23 +248,42 @@ def _xlsx(content: bytes) -> ExtractionResult:
                 if cell.value is None:
                     if is_formula:
                         missing_cached += 1
-                        cells.append((cell, f"{_describe_formula(formula)} (no cached value)"))
+                        cells.append((cell, f"{_describe_formula(formula)} (no cached value)", False))
                     continue
                 text = _format_cell(cell.value, cell.number_format)
                 if not text:
                     continue
-                cells.append((cell, f"{text} [{_describe_formula(formula)}]" if is_formula else text))
+                cells.append((cell, f"{text} [{_describe_formula(formula)}]" if is_formula else text, True))
             if not cells:
                 current = None
                 continue
-            line = f"{cells[0][0].row}: " + " | ".join(f"{c.coordinate}={t}" for c, t in cells)
-            cols = [c.column for c, _ in cells]
+            cols = [c.column for c, _, _ in cells]
             if current is None:
                 current = _Region([], min(cols), max(cols))
                 regions.append(current)
-            current.lines.append((line, cells[0][0].row))
+                raw.append([])
+            raw[-1].append(cells)
             current.min_col = min(current.min_col, *cols)
             current.max_col = max(current.max_col, *cols)
+        # Mask personal-data columns by each region's header (its first row with several cells;
+        # a single-cell first row is a title), then render the rows.
+        for region, rows_ in zip(regions, raw, strict=True):
+            header_at = next((i for i, r in enumerate(rows_[:2]) if len(r) > 1), None)
+            kinds: dict[int, str] = {}
+            if header_at is not None:
+                kinds = {c.column: k for c, t, _ in rows_[header_at] if (k := column_kind(ws.title, t))}
+            for i, cells in enumerate(rows_):
+                if kinds and i > header_at:
+                    masked = []
+                    for c, t, is_value in cells:
+                        if c.column in kinds and is_value:
+                            masked.append((c, marker(kinds[c.column]), is_value))
+                            result.masked += 1
+                        else:
+                            masked.append((c, t, is_value))
+                    cells = masked
+                line = f"{cells[0][0].row}: " + " | ".join(f"{c.coordinate}={t}" for c, t, _ in cells)
+                region.lines.append((line, cells[0][0].row))
 
         # 2. Passages: pack whole regions together up to the target size, so titles and notes
         #    stay with their tables. Split an oversized region by rows and repeat its first row
@@ -289,19 +330,27 @@ def _xlsx(content: bytes) -> ExtractionResult:
     return result
 
 
-def _csv(content: bytes) -> ExtractionResult:
+def _csv(content: bytes, name: str = "") -> ExtractionResult:
     text = content.decode("utf-8-sig", errors="replace")
     rows = list(csv.reader(io.StringIO(text)))
     if not rows:
         return ExtractionResult(notes=["Empty CSV."])
     header = rows[0]
+    kinds = _header_kinds(name, header)
+    result = ExtractionResult()
+
+    def cell(h: str, v: str, kind: str | None) -> str:
+        if kind:
+            result.masked += 1
+            return f"{h}={marker(kind)}"
+        return f"{h}={v}"
+
     units = [(" | ".join(header), 1)]
     units += [
-        (" | ".join(f"{h}={v}" for h, v in zip(header, r) if v.strip()), i)
+        (" | ".join(cell(h, v, k) for h, v, k in zip(header, r, kinds) if v.strip()), i)
         for i, r in enumerate(rows[1:], start=2)
         if any(v.strip() for v in r)
     ]
-    result = ExtractionResult()
     for chunk, keys in _chunk_units(units):
         result.passages.append(Passage(chunk, {"rows": [keys[0], keys[-1]]}))
     return result

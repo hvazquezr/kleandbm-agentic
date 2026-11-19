@@ -269,7 +269,10 @@ export function AssistantPanel({
         const doc = await uploadDocument(path, file);
         setAttachments((a) => [...a, { versionId: doc.latest.id, label: file.name, status: doc.latest.status }]);
         if (doc.latest.status === "extraction_failed") toast.warning(`${file.name}: text couldn't be extracted (${doc.latest.status_detail})`);
-        if (doc.latest.status === "stored_only") toast.info(`${file.name} is stored, but text extraction for images isn't supported yet.`);
+        if (doc.latest.status === "stored_only") toast.info(`${file.name} is stored, but image reading isn't configured, so the agents can't read it.`);
+        if ((doc.latest.personal_data_masked ?? 0) > 0) {
+          toast.info(`${file.name}: ${doc.latest.personal_data_masked} personal data value(s) masked before the agents read it. The file itself is unchanged.`);
+        }
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
@@ -479,7 +482,8 @@ export function AssistantPanel({
           <div className="flex items-center gap-2">
             <input ref={fileInput} type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.png,.jpg,.jpeg"
               onChange={(e) => attach(e.target.files)} />
-            <Button size="sm" variant="outline" disabled={running || uploading} onClick={() => fileInput.current?.click()}>
+            <Button size="sm" variant="outline" disabled={running || uploading} onClick={() => fileInput.current?.click()}
+              title="Personal data in the extracted text is masked before agents see it. Images are read by a vision model, which receives the image itself.">
               {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />} Attach
             </Button>
             {routed && !lockTarget ? (

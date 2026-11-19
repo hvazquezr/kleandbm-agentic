@@ -86,6 +86,10 @@ class DocumentVersion(Base):
     status_detail: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
     embedding_model: Mapped[str | None] = mapped_column(String(127))
+    # Personal-data values masked in the passages (table columns and values in text), so a
+    # person can see that the agents and the embedding provider got a masked copy. NULL: the
+    # passages predate masking and need reprocessing.
+    personal_data_masked: Mapped[int | None] = mapped_column(Integer)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

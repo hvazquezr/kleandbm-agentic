@@ -165,7 +165,11 @@ function DocumentsStep({ path, onBack, onNext }: { path: ProjectPath; onBack: ()
         <Upload className="size-5 mx-auto mb-2" />
         Drop files here, or{" "}
         <button type="button" className="underline" onClick={() => input.current?.click()}>choose files</button>
-        <div className="text-xs mt-1">PDF, Word, Excel, CSV, text, Markdown. Images are stored but not read yet.</div>
+        <div className="text-xs mt-1">PDF, Word, Excel, CSV, text, Markdown, PNG and JPEG.</div>
+        <div className="text-xs mt-1">
+          Personal data in the extracted text is masked before agents or search see it. Images are read by a vision
+          model, which receives the image itself.
+        </div>
         <input ref={input} type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.png,.jpg,.jpeg" onChange={(e) => upload(e.target.files)} />
       </div>
       {busy && <p className="text-sm flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Uploading and extracting…</p>}
@@ -178,6 +182,12 @@ function DocumentsStep({ path, onBack, onNext }: { path: ProjectPath; onBack: ()
             {flagCounts.byDocument.get(d.id) && (
               <Badge variant="outline" className="gap-1 font-normal text-amber-500" title="An agent found text here that tried to instruct it; see the Review tab">
                 <Flag className="size-3" /> flagged
+              </Badge>
+            )}
+            {(d.latest.personal_data_masked ?? 0) > 0 && (
+              <Badge variant="outline" className="font-normal text-muted-foreground"
+                title="Emails, phone numbers, names and other personal data were masked in the text the agents read; the file itself is unchanged">
+                {d.latest.personal_data_masked} masked
               </Badge>
             )}
             <Badge variant="outline" className={cn("ml-auto font-normal",

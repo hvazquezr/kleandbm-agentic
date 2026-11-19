@@ -24,6 +24,7 @@ from app.adapters.extraction import (
     content_type_for,
     extract,
 )
+from app.adapters.personal_data import mask_text
 from app.adapters.storage import ObjectStore, object_key
 from app.adapters.vision import ImageDescriber, VisionError
 from app.domain.access import NotFoundInScope, Permission, ProjectScope
@@ -164,12 +165,26 @@ def _process(
         result = ExtractionResult(passages=passages_, notes=notes)
     else:
         try:
-            result = extract(data, version.content_type)
+            result = extract(data, version.content_type, version.filename)
         except ExtractionError as exc:
             version.status = VersionStatus.EXTRACTION_FAILED
             version.status_detail = str(exc)
             session.flush()
             return
+    # Personal data is masked once, here, before passages are stored or embedded: agents, the
+    # embedding provider, transcripts and traces only ever see the masked text. The stored file
+    # is unchanged and still downloads as uploaded.
+    masked = result.masked
+    clean: list[Passage] = []
+    for p in result.passages:
+        text, n = mask_text(p.text)
+        masked += n
+        clean.append(Passage(text, p.location))
+    result.passages = clean
+    version.personal_data_masked = masked
+    if masked:
+        result.notes.append(f"{masked} personal data value(s) masked before the text was stored or searched; "
+                            "the original file is unchanged.")
     version.notes = result.notes
     if not result.passages:
         version.status = VersionStatus.STORED_ONLY
@@ -263,9 +278,10 @@ def reprocess_version(
 
 
 def needs_reprocessing(version: DocumentVersion, embedder: Embedder, describer: ImageDescriber | None) -> bool:
-    """Stale embeddings, failed embeddings, or images that weren't read and now can be."""
+    """Stale embeddings, failed embeddings, passages extracted before personal data was masked,
+    or images that weren't read and now can be."""
     if version.status in (VersionStatus.READY, VersionStatus.EMBEDDING_FAILED):
-        return version.embedding_model != embedder.model
+        return version.embedding_model != embedder.model or version.personal_data_masked is None
     if version.status is VersionStatus.STORED_ONLY:
         return version.content_type in STORED_ONLY_TYPES and describer is not None
     return False

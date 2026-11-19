@@ -106,7 +106,7 @@ export async function sendAgentMessage(
 export async function uploadDocument(
   path: { tenant_id: string; project_id: string },
   file: File,
-): Promise<{ id: string; title: string; latest: { id: string; status: string; version_no: number; filename: string; notes: string[]; status_detail: string | null } }> {
+): Promise<{ id: string; title: string; latest: { id: string; status: string; version_no: number; filename: string; notes: string[]; status_detail: string | null; personal_data_masked: number | null } }> {
   const form = new FormData();
   form.append("file", file);
   const resp = await fetch(`/api/tenants/${path.tenant_id}/projects/${path.project_id}/documents`, {
