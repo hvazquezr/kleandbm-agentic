@@ -205,6 +205,7 @@ def parse_route(turn) -> dict[str, Any]:
 def _close(session: Session, run: AgentRun, status: RunStatus, detail: str | None) -> None:
     run.status, run.status_detail, run.finished_at = status, detail, datetime.now(UTC)
     session.commit()
+    tracing.record_outcome(run)
 
 
 def route_turn(

@@ -193,7 +193,9 @@ def suggest_table(
     except LLMError as exc:
         run.status, run.status_detail, run.finished_at = RunStatus.FAILED, str(exc)[:2000], datetime.now(UTC)
         session.commit()
+        tracing.record_outcome(run)
         raise
     run.status, run.finished_at = RunStatus.COMPLETED, datetime.now(UTC)
     session.commit()
+    tracing.record_outcome(run)
     return TableSuggestion(run_id=run.id, table=table, attributes=attributes, notes=notes)

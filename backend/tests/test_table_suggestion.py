@@ -165,5 +165,6 @@ def test_the_dialog_saves_a_suggestion_as_one_user_changeset(proj, db_session_fa
     assert r.status_code == 201, r.text
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     vendor = next(t for t in snap["tables"] if t["data"]["name"] == "dim_vendor")
-    names = [a["data"]["name"] for a in snap["attributes"] if a["data"]["table_id"] == vendor["id"]]
+    names = [a["data"]["name"] for a in sorted(snap["attributes"], key=lambda a: a["data"]["ordinal"])
+             if a["data"]["table_id"] == vendor["id"]]
     assert names == ["vendor_sk", "vendor_id", "vendor_name"]

@@ -202,7 +202,7 @@ def consult(
 
     status, detail = RunStatus.COMPLETED, None
     try:
-        with tracing.child_run(child, "consultation"):
+        with tracing.child_run(child, "consultation run"):
             final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
                                {"recursion_limit": 4 * max_iterations + 10})
     except Exception as exc:
@@ -211,6 +211,7 @@ def consult(
         child.status, child.finished_at = RunStatus.FAILED, datetime.now(UTC)
         child.status_detail = str(exc) if isinstance(exc, LLMError) else f"failed unexpectedly ({type(exc).__name__})"
         session.commit()
+        tracing.record_outcome(child)
         raise
     stop = final.get("stop")
     if stop not in (None, "finished"):
@@ -218,6 +219,7 @@ def consult(
     record_usage(child, loop.usage, ctx.changeset_seqs)
     child.status, child.status_detail, child.finished_at = status, detail, datetime.now(UTC)
     session.commit()
+    tracing.record_outcome(child)
     answer = ctx.answer or {"outcome": "no_answer", "answer": last_text(final["transcript"])[:1000],
                             "citations": [], "records": [], "needs_user": True}
     return {**answer, "consultation_run_id": str(child.id), "changeset_seqs": list(ctx.changeset_seqs)}

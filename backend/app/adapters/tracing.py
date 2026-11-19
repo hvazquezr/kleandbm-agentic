@@ -13,7 +13,11 @@ What a trace holds depends on `KLEANDBM_LANGSMITH_CONTENT`:
   values, which is why it isn't the default.
 
 Every trace carries the scope (tenant, project, model, conversation, agent, initiating user) as
-metadata and the run id as its id, so a trace and its `agent_runs` row share one id. Global
+metadata and the run id as its id, so a trace and its `agent_runs` row share one id. Agents
+set a run's final status after its traced code returns, and LangSmith takes one update per run,
+so an agent run's trace stays open until `record_outcome` ends it with that status (outputs
+`status`, LangSmith's error flag with a fixed text for a failed run, and `outcome` feedback):
+dashboards and alerts can then count failed and stopped runs. Global
 `LANGSMITH_*` variables are ignored: tracing is switched off explicitly unless these settings
 turn it on, so a stray environment variable can't start sending unhidden traces.
 """
@@ -29,6 +33,16 @@ from app.adapters.personal_data import mask_text
 from app.domain.redaction import redact_credentials
 
 log = logging.getLogger(__name__)
+
+# Agent runs traced in this process and not ended yet: run id -> the open RunTree, whether its
+# code has finished (`closed`) and whether its final status has been set (`waiting`). LangSmith
+# accepts one update per run, and agents set a run's final status after its traced code returns
+# (the router just before), so a run is ended, with that status, once both have happened.
+_open: dict[Any, dict[str, Any]] = {}
+FAILED_ERROR = "agent run failed"
+# Agent-run spans (top-level runs, router children, Validator rounds, consultations) are named
+# "<something> run" and nothing else is: dashboards count agent runs with Run Name contains " run".
+# Tags and metadata can't mark them, since nested runs inherit both.
 
 # Keys kept in metadata mode: numbers, statuses, names, never content.
 SAFE_KEYS = frozenset({"usage_metadata", "stop_reason", "tool_names", "model", "message_count", "iterations", "stop",
@@ -87,8 +101,9 @@ def run_metadata(run) -> dict[str, Any]:
 @contextmanager
 def agent_run(run, settings=None, client=None) -> Iterator[None]:
     """Trace one top-level agent run, or explicitly don't. `client` replaces the LangSmith client
-    (tests); otherwise it comes from settings."""
+    (tests); otherwise it comes from settings. The run is ended when its outcome is recorded."""
     from langsmith import run_helpers as rh
+    from langsmith.run_trees import RunTree
 
     if getattr(run, "parent_run_id", None) and rh.get_tracing_context().get("enabled"):
         # An agent answering for the request router: a child of the router run's trace.
@@ -105,28 +120,82 @@ def agent_run(run, settings=None, client=None) -> Iterator[None]:
     client = client or _client(settings.langsmith_api_key, settings.langsmith_endpoint, settings.langsmith_content)
     metadata = {**run_metadata(run), **(settings.langsmith_metadata or {})}
     tags = [f"agent:{run.agent}", *(settings.langsmith_tags or [])]
+    tree = RunTree(name=f"{run.agent} run", run_type="chain", id=run.id, inputs={"agent": run.agent},
+                   extra={"metadata": metadata}, tags=tags, ls_client=client,
+                   session_name=settings.langsmith_project)
     with rh.tracing_context(enabled=True, client=client, project_name=settings.langsmith_project,
-                            tags=tags, metadata=metadata):
-        with rh.trace(f"{run.agent} run", "chain", run_id=run.id, inputs={"agent": run.agent},
-                      metadata=metadata, tags=tags) as root:
-            yield
-            root.end(outputs={"status": getattr(run.status, "value", run.status),
-                              "iterations": run.iterations})
+                            tags=tags, metadata=metadata, parent=tree):
+        yield from _hold(run, tree)
 
 
 @contextmanager
 def child_run(run, name: str | None = None) -> Iterator[None]:
     """Trace a child run (consultation, Validator round) inside its parent's trace. A no-op when
-    the parent isn't traced."""
+    the parent isn't traced. The run is ended when its outcome is recorded."""
     from langsmith import run_helpers as rh
 
-    if not rh.get_tracing_context().get("enabled"):
+    parent = rh.get_current_run_tree() if rh.get_tracing_context().get("enabled") else None
+    if parent is None:
         yield
         return
-    with rh.trace(name or f"{run.agent} run", "chain", run_id=run.id, inputs={"agent": run.agent},
-                  metadata=run_metadata(run), tags=[f"agent:{run.agent}"]) as span:
+    tree = parent.create_child(name or f"{run.agent} run", "chain", run_id=run.id, inputs={"agent": run.agent},
+                               extra={"metadata": run_metadata(run)}, tags=[f"agent:{run.agent}"])
+    with rh.tracing_context(parent=tree):
+        yield from _hold(run, tree)
+
+
+def _hold(run, tree) -> Iterator[None]:
+    tree.post()
+    _open[run.id] = {"tree": tree, "closed": False, "waiting": False}
+    try:
         yield
-        span.end(outputs={"status": getattr(run.status, "value", run.status), "iterations": run.iterations})
+    finally:
+        _closed(run)
+
+
+def _final(run) -> bool:
+    return getattr(run.status, "value", run.status) not in (None, "running")
+
+
+def _closed(run) -> None:
+    entry = _open.get(run.id)
+    if entry is None:
+        return
+    entry["closed"] = True
+    if entry["waiting"] or _final(run):
+        _send_outcome(run)
+
+
+def record_outcome(run) -> None:
+    """End a traced run with its final status, once the agent has set it and its traced code has
+    returned: outputs `status`, the error flag for a failed run (so LangSmith's error rate and
+    error alerts count it), and `outcome` feedback (score 1 completed, 0 otherwise; value the
+    status) for charts and alerts on stopped runs. No content: the error text is fixed. Never
+    raises; a no-op for a run that wasn't traced. LangSmith takes one update per run, so this is
+    the run's only end."""
+    entry = _open.get(run.id)
+    if entry is None:
+        return
+    if not entry["closed"]:
+        entry["waiting"] = True  # ended when its traced code returns
+        return
+    _send_outcome(run)
+
+
+def _send_outcome(run) -> None:
+    entry = _open.pop(run.id, None)
+    if entry is None:
+        return
+    tree = entry["tree"]
+    status = getattr(run.status, "value", run.status)
+    try:
+        tree.end(outputs={"status": status, "iterations": run.iterations},
+                 error=FAILED_ERROR if status == "failed" else None, end_time=run.finished_at)
+        tree.patch()
+        tree.ls_client.create_feedback(run.id, key="outcome", score=1 if status == "completed" else 0, value=status,
+                                       trace_id=tree.trace_id)
+    except Exception:  # tracing must never break a run
+        log.warning("couldn't record the outcome of run %s on its trace", run.id, exc_info=True)
 
 
 @contextmanager

@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.llm import ChatModel, ToolSpec, Usage
-from app.adapters.tracing import span, traced_complete
+from app.adapters.tracing import record_outcome, span, traced_complete
 from app.agents.transcripts import RunTranscript
 from app.persistence.conversations import AgentRun, Conversation, ConversationMessage, MessageRole, RunStatus
 
@@ -363,6 +363,7 @@ def finish_run(
         )
         session.add(message)
     session.commit()
+    record_outcome(run)
     emit({
         "type": "done",
         "status": str(status),

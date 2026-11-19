@@ -76,10 +76,20 @@ def test_an_agent_run_is_one_trace_with_its_children_and_no_content(proj, traced
     assert meta["tenant_id"] and meta["project_id"] and meta["agent"] == "architect" and meta["experiment"] == "unit"
     assert all(r["trace_id"] == root["id"] for r in runs.values())
 
-    validators = [r for r in runs.values() if r["name"] == "validator round"]
+    validators = [r for r in runs.values() if r["name"] == "validator run"]
     names = {i: r["name"] for i, r in runs.items()}
     # LangGraph traces its nodes too: each Validator round sits under the Architect's review node.
     assert len(validators) == 2 and all(names[r["parent_run_id"]] == "review" for r in validators)
+    # Dashboards count agent runs by "Run Name contains ' run'": only agent-run spans match.
+    assert {r["name"] for r in runs.values() if " run" in r["name"]} == {"architect run", "validator run"}
+    # LangSmith accepts one update per run (409 on a second): no run is updated twice.
+    patches = [body["id"] for method, url, body in session.sent if method == "PATCH"]
+    assert patches and len(patches) == len(set(patches))
+    # Each run's final status reached its trace, with outcome feedback per run.
+    assert root["outputs"]["status"] == "completed" and not root.get("error")
+    assert [r["outputs"]["status"] for r in validators] == ["completed", "completed"]
+    outcomes = {fb["run_id"]: fb["value"] for fb in _feedback(session)}
+    assert outcomes[root["id"]] == "completed" and all(outcomes[r["id"]] == "completed" for r in validators)
     llm = [r for r in runs.values() if r["run_type"] == "llm"]
     assert {r["name"] for r in llm} == {"architect model", "validator model"}
     usage = next(r for r in llm if r.get("outputs"))["outputs"]["usage_metadata"]
@@ -127,3 +137,64 @@ def test_metadata_mode_keeps_numbers_and_names_only():
         {"usage_metadata": {"input_tokens": 3}, "tool_names": ["a"], "content": "hidden"}
     assert tracing._metadata_only({"iterations": 2}) == {"iterations": 2}
     assert tracing._metadata_only("raw") == {"content": "hidden"}
+
+
+def _fake_run(status="running"):
+    import uuid
+    from types import SimpleNamespace
+    return SimpleNamespace(id=uuid.uuid4(), tenant_id=uuid.uuid4(), project_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
+                           agent="business_requirements", parent_run_id=None, initiated_by=uuid.uuid4(),
+                           status=status, iterations=3, finished_at=None)
+
+
+def _feedback(session):
+    return [body for method, url, body in session.sent if method == "POST" and url.endswith("/feedback")]
+
+
+@pytest.mark.parametrize("status, error, score", [("completed", None, 1), ("stopped", None, 0),
+                                                  ("failed", tracing.FAILED_ERROR, 0)])
+def test_the_final_status_set_after_the_trace_closes_reaches_it(traced, status, error, score):
+    """Agents set a run's status after its traced code returned, and LangSmith takes one update
+    per run: the run is ended then, with its status, a content-free error for a failed run, and
+    outcome feedback."""
+    session = traced("metadata")
+    run = _fake_run()
+    with tracing.agent_run(run):
+        pass
+    assert "end_time" not in session.runs()[str(run.id)]  # open until its outcome is known
+    run.status = status
+    tracing.record_outcome(run)
+    root = session.runs()[str(run.id)]
+    assert root["outputs"]["status"] == status and root.get("error") == error
+    assert root["name"] == "business_requirements run" and root["extra"]["metadata"]["agent"] == "business_requirements"
+    [fb] = _feedback(session)
+    assert fb["run_id"] == str(run.id) and fb["key"] == "outcome" and fb["score"] == score and fb["value"] == status
+    tracing.record_outcome(run)  # once only
+    assert len(_feedback(session)) == 1
+
+
+def test_an_outcome_set_inside_the_trace_is_sent_after_it_closes(traced):
+    """The router sets its run's status inside its traced code: the run ends when that returns."""
+    session = traced("metadata")
+    run = _fake_run()
+    with tracing.agent_run(run):
+        run.status = "failed"
+        tracing.record_outcome(run)
+        assert not _feedback(session)  # not yet
+    assert session.runs()[str(run.id)]["error"] == tracing.FAILED_ERROR
+    assert [fb["value"] for fb in _feedback(session)] == ["failed"]
+
+
+def test_untraced_runs_and_tracing_errors_are_ignored(traced, monkeypatch):
+    run = _fake_run("completed")
+    tracing.record_outcome(run)  # never traced: nothing to do
+
+    session = traced("metadata")
+    run = _fake_run()
+    with tracing.agent_run(run):
+        pass
+    client = tracing._open[run.id]["tree"].ls_client
+    monkeypatch.setattr(type(client), "create_feedback", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    run.status = "completed"
+    tracing.record_outcome(run)  # logs, doesn't raise
+    assert run.id not in tracing._open

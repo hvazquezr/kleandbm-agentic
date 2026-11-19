@@ -105,7 +105,7 @@ def review(
     status, detail = "completed", None
     try:
         brief = _brief(session, scope, candidate, source_ids, round_no, previous, correction)
-        with tracing.child_run(child, "validator round"):
+        with tracing.child_run(child, "validator run"):
             final = app.invoke({"transcript": [{"role": "user", "text": brief}], "iterations": 0, "stop": None},
                                {"recursion_limit": 4 * max_iterations + 10})
         if ctx.summary is None:
@@ -122,5 +122,6 @@ def review(
     child.status = {"completed": RunStatus.COMPLETED, "incomplete": RunStatus.STOPPED}.get(status, RunStatus.FAILED)
     child.status_detail, child.finished_at = detail, datetime.now(UTC)
     session.commit()
+    tracing.record_outcome(child)
     return {"round": round_no, "run_id": str(child.id), "model": chat_model.model, "status": status,
             "detail": detail, "summary": ctx.summary, "findings": list(ctx.findings.values())}
