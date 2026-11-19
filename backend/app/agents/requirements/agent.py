@@ -22,7 +22,8 @@ from app.agents.requirements.prompt import SYSTEM_PROMPT
 from app.agents.requirements.tools import HANDLERS, TOOL_SPECS, WRITE_TOOLS, ToolContext
 from app.adapters import tracing
 from app.agents.runtime import (
-    Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome, turn_message,
+    Emit, Loop, State, conversation_history, finish_run, last_text, record_usage, run_config, stop_outcome,
+    turn_message,
 )
 from app.domain import documents, modeling, sources, tenancy
 from app.domain.access import Actor, ActorKind
@@ -31,7 +32,6 @@ from app.persistence.modeling import DataModel
 from app.persistence.models import Project
 
 AGENT_NAME = "business_requirements"
-HISTORY_MESSAGES = 20
 
 
 def _context_block(session: Session, scope, conversation: Conversation, attachments: list[str]) -> str:
@@ -78,23 +78,6 @@ def _sources_line(session: Session, scope, conversation: Conversation) -> str:
     return f"{label}: {names}. You can't query them; the Architect checks them when it designs."
 
 
-def _history(session: Session, conversation_id: uuid.UUID, upto_ordinal: int) -> list[dict[str, Any]]:
-    rows = list(session.scalars(
-        select(ConversationMessage)
-        .where(ConversationMessage.conversation_id == conversation_id, ConversationMessage.ordinal < upto_ordinal)
-        .order_by(ConversationMessage.ordinal.desc())
-        .limit(HISTORY_MESSAGES)
-    ))
-    out = []
-    for m in reversed(rows):
-        out.append({"role": "user", "text": m.text} if m.role is MessageRole.USER
-                   else {"role": "assistant", "text": m.text, "tool_calls": [], "raw": None})
-    # The API needs the transcript to start with a user turn.
-    while out and out[0]["role"] != "user":
-        out.pop(0)
-    return out
-
-
 def run_turn(
     session_factory: sessionmaker[Session],
     *,
@@ -130,7 +113,7 @@ def run_turn(
             except Exception:
                 continue
 
-        transcript = _history(session, conversation.id, user_msg.ordinal)
+        transcript = conversation_history(session, conversation.id, user_msg.ordinal, "business_requirements")
         transcript.append({
             "role": "user",
             "text": f"<project_context>\n{_context_block(session, scope, conversation, attachment_labels)}\n"

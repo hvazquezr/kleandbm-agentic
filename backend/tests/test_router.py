@@ -257,3 +257,53 @@ def test_a_routed_turn_is_one_trace_with_the_agent_inside(proj, monkeypatch):
     assert all(r["trace_id"] == root["id"] for r in runs.values())
     assert {r["name"] for r in runs.values() if r["run_type"] == "llm"} == {"router model", "business_requirements model"}
     assert "monthly sales by vendor" not in json.dumps([b for _, _, b in session.sent])  # metadata mode
+
+
+def _turns(model, call=-1):
+    return model.calls[call]["transcript"]
+
+
+def test_each_agent_sees_its_own_replies_in_full_and_the_others_summarized(proj):
+    long_reply = "Recorded Q-001 about vendors. " + "Detail from the notes. " * 60
+    conv, models = assistant(
+        proj,
+        [route("requirements"), route("architect", "It asks for the model."), route("requirements", "A definition.")],
+        requirements_steps=[question(False), {"text": long_reply}, {"text": "Done."}])
+    models["architect"].steps.extend(_fix_seq(proj, design_steps(proj)))
+    send(proj, conv, "What does vendor mean?")
+    send(proj, conv, "Draft the model")
+    send(proj, conv, "Define vendor as the supplier.")
+
+    # The Architect saw the Requirements reply as a summary: author, opening, the records it changed.
+    arch_history = _turns(models["architect"], 0)[:-1]
+    [summary] = [t["text"] for t in arch_history if t["role"] == "assistant"]
+    assert summary.startswith("[The Business Requirements agent answered this message.")
+    assert "added Q-001" in summary and summary.count("Detail from the notes.") < 20
+
+    # The Requirements agent saw its own reply in full and the Architect's summarized, with the
+    # Architect's deterministic change note.
+    req_history = _turns(models["business_requirements"])[:-1]
+    own, other = [t["text"] for t in req_history if t["role"] == "assistant"]
+    assert own == long_reply
+    assert other.startswith("[The Architect answered this message.") and "**What this run changed:**" in other
+    assert [t["role"] for t in req_history] == ["user", "assistant", "user", "assistant"]
+
+
+def test_a_chained_turn_is_one_assistant_turn_in_later_history(proj):
+    conv, models = assistant(
+        proj, [route("requirements_then_architect", "Both."), route("requirements", "A follow-up.")],
+        requirements_steps=[{"text": "Recorded the vendor requirement."}, {"text": "Updated."}])
+    models["architect"].steps.extend(_fix_seq(proj, design_steps(proj)))
+    send(proj, conv, "Add a vendor dimension")
+    send(proj, conv, "Vendors are suppliers.")
+    history = _turns(models["business_requirements"])[:-1]
+    assert [t["role"] for t in history] == ["user", "assistant"]
+    assert history[1]["text"].startswith("Recorded the vendor requirement.\n\n[The Architect answered")
+
+
+def test_single_agent_conversations_keep_every_reply_in_full(proj):
+    proj.client.app.state.chat_model_factory = lambda agent: model
+    model = ScriptedChatModel([{"text": "First answer. " * 50}, {"text": "Second."}])
+    send(proj, proj.conv, "Define net sales.")
+    send(proj, proj.conv, "And gross sales?")
+    assert _turns(model)[1]["text"].startswith("First answer. " * 50)  # not summarized

@@ -44,10 +44,10 @@ from app.agents.architect.tools import (
     ArchitectContext,
     _open_meaning_issues,
 )
-from app.agents.requirements.agent import _history
 from app.adapters import tracing
 from app.agents.runtime import (
-    Emit, Loop, State, finish_run, last_text, record_usage, run_config, stop_outcome, turn_message,
+    Emit, Loop, State, conversation_history, finish_run, last_text, record_usage, run_config, stop_outcome,
+    turn_message,
 )
 from app.agents.validator.agent import review as validator_review
 from app.domain import design, modeling, sources, tenancy
@@ -148,7 +148,7 @@ def run_design(
         )
         emit({"type": "candidate", "candidate_id": str(candidate.id), "status": str(candidate.status)})
 
-        transcript = _history(session, conversation.id, user_msg.ordinal)
+        transcript = conversation_history(session, conversation.id, user_msg.ordinal, "architect")
         transcript.append({
             "role": "user",
             "text": f"<project_context>\n{_context_block(session, scope, model, ctx, empty_at_start)}\n"

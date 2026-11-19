@@ -201,6 +201,71 @@ def turn_message(session: Session, run: AgentRun) -> ConversationMessage | None:
         ConversationMessage.role == MessageRole.USER).order_by(ConversationMessage.ordinal.desc()).limit(1))
 
 
+HISTORY_MESSAGES = 20
+AGENT_LABELS = {"business_requirements": "Business Requirements agent", "architect": "Architect"}
+CHANGES_MARKER = "**What this run changed:**"
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def reply_summary(message: ConversationMessage, agent: str) -> str:
+    """Another agent's reply, shortened for this agent's history: who wrote it, the records its
+    tools changed, its opening, and the Architect's deterministic change note. Never the whole
+    text, so neither agent's context fills with the other's work."""
+    by_action: dict[str, list[str]] = {}
+    for item in message.activity or []:
+        record = item.get("record") if item.get("ok") else None
+        if record and record.get("code"):
+            codes = by_action.setdefault(record.get("action") or "changed", [])
+            if record["code"] not in codes:
+                codes.append(record["code"])
+    text = message.text or ""
+    head, marker, changes = text.partition(CHANGES_MARKER)
+    parts = [f"[The {AGENT_LABELS.get(agent, agent)} answered this message. Summary written by the "
+             f"application; the full reply isn't shown.]",
+             f"Its reply began: \"{_clip(head, 300)}\""]
+    if by_action:
+        parts.append("Register entries its tools changed: "
+                     + "; ".join(f"{action} {', '.join(codes)}" for action, codes in by_action.items()) + ".")
+    if marker:
+        parts.append(marker + " " + _clip(changes, 900))
+    return "\n".join(parts)
+
+
+def conversation_history(session: Session, conversation_id, upto_ordinal: int, agent: str) -> list[dict[str, Any]]:
+    """Earlier turns of the conversation for `agent`. Its own replies and the router's (short
+    questions and notes) are in full; replies by the other agent, in an Assistant conversation,
+    are summaries (`reply_summary`). Consecutive replies in one turn are joined."""
+    rows = list(session.scalars(
+        select(ConversationMessage)
+        .where(ConversationMessage.conversation_id == conversation_id, ConversationMessage.ordinal < upto_ordinal)
+        .order_by(ConversationMessage.ordinal.desc())
+        .limit(HISTORY_MESSAGES)
+    ))
+    rows.reverse()
+    run_ids = [m.run_id for m in rows if m.role is MessageRole.ASSISTANT and m.run_id]
+    authors = dict(session.execute(select(AgentRun.id, AgentRun.agent).where(AgentRun.id.in_(run_ids))).all()) \
+        if run_ids else {}
+    out: list[dict[str, Any]] = []
+    for m in rows:
+        if m.role is MessageRole.USER:
+            out.append({"role": "user", "text": m.text})
+            continue
+        author = authors.get(m.run_id, agent)
+        text = reply_summary(m, author) if author in AGENT_LABELS and author != agent else m.text
+        if out and out[-1]["role"] == "assistant":
+            out[-1]["text"] += "\n\n" + text
+        else:
+            out.append({"role": "assistant", "text": text, "tool_calls": [], "raw": None})
+    # The API needs the transcript to start with a user turn.
+    while out and out[0]["role"] != "user":
+        out.pop(0)
+    return out
+
+
 def last_text(transcript: list[dict[str, Any]]) -> str:
     return next((t["text"] for t in reversed(transcript) if t["role"] == "assistant" and t.get("text")), "")
 
