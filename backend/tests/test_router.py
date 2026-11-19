@@ -104,14 +104,87 @@ def test_a_router_turn_without_a_route_becomes_a_question(proj):
     assert proj.alice.get(f"{proj.base}/agent-runs/{events[0]['run_id']}").json()["route"]["route"] == "clarify"
 
 
-def test_requirements_then_architect_runs_requirements_until_chaining_exists(proj):
+def question(blocking, description="Does vendor mean the supplier or the brand owner?"):
+    return {"tool_calls": [{"name": "raise_question", "input": {
+        "kind": "clarification", "description": description, "impact": "", "is_blocking": blocking,
+        "proposed_action": "", "concerns_ids": []}}]}
+
+
+def test_requirements_then_architect_chains_the_architect(proj):
     conv, models = assistant(proj, [route("requirements_then_architect", "It adds a requirement and a design change.")],
-                             requirements_steps=[{"text": "Recorded the vendor requirement."}])
+                             requirements_steps=[question(False), {"text": "Noted the vendor meaning as Q-001."}])
+    models["architect"].steps.extend(_fix_seq(proj, design_steps(proj)))
     events = send(proj, conv, "Add a vendor dimension so we can report sales by vendor")
+    kinds = [e["type"] for e in events]
     [routed] = [e for e in events if e["type"] == "route"]
-    assert routed["agents"] == ["business_requirements"] and "isn't chained yet" in routed["reason"]
+    assert routed["agents"] == ["business_requirements", "architect"]
+    # One "done" at the end; the first agent's outcome is a step, then the handoff.
+    assert kinds.count("done") == 1 and kinds[-1] == "done" and events[-1]["status"] == "completed"
+    assert kinds.index("step_done") < kinds.index("handoff") < kinds.index("candidate")
+    [step] = [e for e in events if e["type"] == "step_done"]
+    [handoff] = [e for e in events if e["type"] == "handoff"]
+    assert step["agent"] == "business_requirements" and step["status"] == "completed"
+    assert handoff["from"] == "business_requirements" and handoff["to"] == "architect"
+    assert "added Q-001" in handoff["note"]
+
+    user, req_reply, arch_reply = messages(proj, conv)
+    assert req_reply["agent"] == "business_requirements" and arch_reply["agent"] == "architect"
+    router_id = events[0]["run_id"]
+    assert req_reply["turn_run_id"] == arch_reply["turn_run_id"] == router_id
+    run = proj.alice.get(f"{proj.base}/agent-runs/{router_id}").json()
+    assert run["status"] == "completed" and run["child_run_ids"] == [req_reply["run_id"], arch_reply["run_id"]]
+
+    # The Architect got the user's message with the application's handoff note, never the
+    # Requirements agent's reply text.
+    turn = models["architect"].calls[0]["transcript"][-1]["text"]
+    assert "<handoff>" in turn and "Q-001" in turn and turn.endswith("report sales by vendor")
+    assert "Noted the vendor meaning" not in turn
+
+
+def test_a_blocking_question_stops_the_chain(proj):
+    conv, models = assistant(proj, [route("requirements_then_architect", "It adds a requirement and a design change.")],
+                             requirements_steps=[question(True), {"text": "I raised Q-001; it needs your answer."}])
+    events = send(proj, conv, "Add a vendor dimension so we can report sales by vendor")
     assert models["architect"].calls == []
-    assert messages(proj, conv)[-1]["agent"] == "business_requirements"
+    assert [e["type"] for e in events].count("done") == 1 and "handoff" not in [e["type"] for e in events]
+    done = events[-1]
+    assert done["type"] == "done" and "blocking question (Q-001)" in done["chain_stopped"]
+
+    user, req_reply, note = messages(proj, conv)
+    assert req_reply["agent"] == "business_requirements"
+    assert note["agent"] == "router" and note["id"] == done["note_message_id"] and "Answer it first" in note["text"]
+    run = proj.alice.get(f"{proj.base}/agent-runs/{events[0]['run_id']}").json()
+    assert run["status"] == "completed" and len(run["child_run_ids"]) == 1
+
+
+def test_a_failed_requirements_run_stops_the_chain(proj):
+    def provider_error(_transcript):
+        raise LLMError("the provider returned 529 overloaded")
+
+    conv, models = assistant(proj, [route("requirements_then_architect", "It adds a requirement and a design change.")],
+                             requirements_steps=[provider_error])
+    events = send(proj, conv, "Add a vendor dimension")
+    assert models["architect"].calls == []
+    assert events[-1]["status"] == "failed" and "didn't finish" in events[-1]["chain_stopped"]
+    assert proj.alice.get(f"{proj.base}/agent-runs/{events[0]['run_id']}").json()["status"] == "failed"
+    assert messages(proj, conv)[-1]["agent"] == "router"
+
+
+def test_an_unavailable_architect_ends_the_chain_after_requirements(proj):
+    conv, models = assistant(proj, [route("requirements_then_architect", "It adds a requirement and a design change.")],
+                             requirements_steps=[{"text": "Recorded."}])
+    factory = proj.client.app.state.chat_model_factory
+
+    def without_architect(agent):
+        if agent == "architect":
+            raise LLMError("no model is configured for the architect agent")
+        return factory(agent)
+
+    proj.client.app.state.chat_model_factory = without_architect
+    events = send(proj, conv, "Add a vendor dimension")
+    assert [e["type"] for e in events].count("done") == 1
+    assert "Architect isn't available" in events[-1]["chain_stopped"]
+    assert [m["agent"] for m in messages(proj, conv)] == [None, "business_requirements", "router"]
 
 
 def test_a_chosen_agent_skips_the_router(proj):

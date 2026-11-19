@@ -262,7 +262,7 @@ def _runners(app_state, settings, tenant_id: uuid.UUID, project_id: uuid.UUID) -
     def build(agent: str) -> Runner:
         chat_model = factory(agent)
         if agent != "architect":
-            def run_requirements(run_id: uuid.UUID, emit) -> None:
+            def run_requirements(run_id: uuid.UUID, emit, note: str | None = None) -> None:
                 run_turn(
                     app_state.session_factory, tenant_id=tenant_id, project_id=project_id,
                     run_id=run_id, chat_model=chat_model, embedder=app_state.embedder,
@@ -282,7 +282,7 @@ def _runners(app_state, settings, tenant_id: uuid.UUID, project_id: uuid.UUID) -
         except LLMError as exc:
             validator_unavailable = str(exc)
 
-        def run_architect(run_id: uuid.UUID, emit) -> None:
+        def run_architect(run_id: uuid.UUID, emit, note: str | None = None) -> None:
             run_design(
                 app_state.session_factory, tenant_id=tenant_id, project_id=project_id,
                 run_id=run_id, chat_model=chat_model, embedder=app_state.embedder,
@@ -299,7 +299,7 @@ def _runners(app_state, settings, tenant_id: uuid.UUID, project_id: uuid.UUID) -
                     max_model_calls=settings.tot_max_model_calls, max_tool_calls=settings.tot_max_tool_calls,
                     max_seconds=settings.tot_max_seconds, max_output_tokens=settings.tot_max_output_tokens,
                 ) if settings.architect_tot_enabled else None,
-                max_decision_points=settings.architect_max_decision_points,
+                max_decision_points=settings.architect_max_decision_points, handoff=note,
             )
         return Runner(chat_model.model, run_architect)
 
@@ -352,7 +352,7 @@ def send_message(
                 route_turn(app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
                            chat_model=chat_model, target=body.agent, runners=runners, emit=events.put)
             else:
-                runner.run(run_id, events.put)
+                runner.run(run_id, events.put, None)
         except Exception as exc:  # the runs record their own outcomes; this catches setup failures
             traceback.print_exc()
             _mark_failed(app_state.session_factory, run_id, f"the agent could not start ({type(exc).__name__})")

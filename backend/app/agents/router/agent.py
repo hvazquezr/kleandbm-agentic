@@ -12,9 +12,13 @@ router run, so usage, transcripts, tracing and the monitor follow the usual pare
 A message sent with a known target (an action such as Generate draft, or the user choosing the
 other agent) skips the model call and records `source="user"`.
 
-Routes: requirements, architect, requirements_then_architect, clarify. Chaining the Architect
-after the Business Requirements run is backlog step 2; until then that route runs the Business
-Requirements agent only and says so in the stored decision.
+Routes: requirements, architect, requirements_then_architect, clarify. The chained route (backlog
+step 2) runs the Business Requirements agent, then the Architect as a second child, once the
+first run's register changes are committed. The chain stops when that run didn't complete or
+raised a blocking question: the router adds a note saying why, and the Architect doesn't design
+on a meaning that isn't settled. The Architect gets an application-built handoff note (the record
+codes the first run wrote), never the first agent's reply text. Only the turn's last agent sends
+"done"; the first agent's becomes "step_done", followed by a "handoff" event.
 """
 
 import traceback
@@ -40,11 +44,11 @@ from app.persistence.conversations import (
     AgentRun, Conversation, ConversationMessage, MessageRole, RoutingDecision, RunStatus,
 )
 from app.persistence.design import CandidateStatus, DesignCandidate
-from app.persistence.modeling import DataModel
+from app.persistence.modeling import DataModel, QuestionRevision
 
 AGENT_NAME = "router"
 ROUTES = ("requirements", "architect", "requirements_then_architect", "clarify")
-# Which agents answer each route, in order. Step 1 runs the first one only.
+# Which agents answer each route, in order.
 PLAN = {"requirements": ["business_requirements"], "architect": ["architect"],
         "requirements_then_architect": ["business_requirements", "architect"], "clarify": []}
 TARGETS = {"business_requirements": "requirements", "architect": "architect"}
@@ -72,10 +76,11 @@ ROUTE_SPEC = ToolSpec(
 
 @dataclass
 class Runner:
-    """Runs one agent for a run id: `model` is the model name recorded on the run."""
+    """Runs one agent for a run id: `model` is the model name recorded on the run. The third
+    argument is a handoff note from an earlier agent in the same turn, or None."""
 
     model: str
-    run: Callable[[uuid.UUID, Emit], None]
+    run: Callable[[uuid.UUID, Emit, str | None], None]
 
 
 # Builds the runner for an agent; raises LLMError when its model isn't configured.
@@ -220,40 +225,141 @@ def route_turn(
 
             plan = PLAN[decision["route"]]
             reason = decision["reason"]
-            if len(plan) > 1:
-                reason += " (The Architect step isn't chained yet; ask the Architect once the requirement is recorded.)"
             session.add(RoutingDecision(tenant_id=run.tenant_id, project_id=run.project_id, run_id=run.id,
                                         route=decision["route"], reason=reason, source=source,
                                         router_model=router_model))
             session.commit()
             emit({"type": "route", "route": decision["route"], "reason": reason, "source": source,
-                  "agents": plan[:1]})
+                  "agents": plan})
 
             if not plan:
                 finish_run(session, run, conversation, RunStatus.COMPLETED, None, emit, [],
                            text=decision["question"] or FALLBACK_QUESTION)
                 return
 
-            agent = plan[0]
             try:
-                runner = runners(agent)
+                runner = runners(plan[0])
             except LLMError as exc:
                 finish_run(session, run, conversation, RunStatus.FAILED, str(exc), emit, [],
-                           text=f"The {AGENT_LABELS[agent]} isn't available: {exc}")
+                           text=f"The {AGENT_LABELS[plan[0]]} isn't available: {exc}")
                 return
-            child = AgentRun(tenant_id=run.tenant_id, project_id=run.project_id, conversation_id=run.conversation_id,
-                             agent=agent, parent_run_id=run.id, llm_model=runner.model, status=RunStatus.RUNNING,
-                             initiated_by=run.initiated_by, changeset_seqs=[])
-            session.add(child)
-            session.commit()
-            child_id = child.id
+
+            failed_detail = None
+            note = None
             try:
-                runner.run(child_id, emit)  # writes the reply and sends "done"
+                for step, agent in enumerate(plan):
+                    last = step == len(plan) - 1
+                    held: list[dict[str, Any]] = []
+
+                    def step_emit(event: dict[str, Any], *, _held=held, _last=last) -> None:
+                        # Only the turn's last agent sends "done"; an earlier one's is held until
+                        # the router knows whether the chain goes on.
+                        if event.get("type") == "done" and not _last:
+                            _held.append(event)
+                        else:
+                            emit(event)
+
+                    child = AgentRun(tenant_id=run.tenant_id, project_id=run.project_id,
+                                     conversation_id=run.conversation_id, agent=agent, parent_run_id=run.id,
+                                     llm_model=runner.model, status=RunStatus.RUNNING,
+                                     initiated_by=run.initiated_by, changeset_seqs=[])
+                    session.add(child)
+                    session.commit()
+                    child_id = child.id
+                    try:
+                        runner.run(child_id, step_emit, note)  # writes the reply and sends "done"
+                    finally:
+                        session.expire_all()
+                        child = session.get(AgentRun, child_id)
+                        if child.status is RunStatus.RUNNING:  # its runner couldn't start it
+                            _close(session, child, RunStatus.FAILED, "the agent could not start")
+                    if child.status is RunStatus.FAILED:
+                        failed_detail = child.status_detail or "the agent failed"
+                    if last:
+                        break
+                    nxt = plan[step + 1]
+                    stop = _chain_stop(session, scope, child)
+                    if not stop:
+                        try:
+                            runner = runners(nxt)
+                        except LLMError as exc:
+                            stop = (f"The {AGENT_LABELS[nxt]} isn't available ({exc}), so it didn't work "
+                                    f"on the design part of this message.")
+                    if stop:
+                        _stop_chain(session, run, conversation, emit, held, stop)
+                        break
+                    for event in held:  # the first agent's outcome, not the turn's end
+                        emit({**event, "type": "step_done", "agent": agent})
+                    note = handoff_note(session, child)
+                    emit({"type": "handoff", "from": agent, "to": nxt, "note": note})
             finally:
                 session.expire_all()
-                child = session.get(AgentRun, child_id)
-                if child.status is RunStatus.RUNNING:  # its runner couldn't start it
-                    _close(session, child, RunStatus.FAILED, "the agent could not start")
-                failed = child.status is RunStatus.FAILED
-                _close(session, run, RunStatus.FAILED if failed else RunStatus.COMPLETED,
-                       child.status_detail if failed else None)
+                router_run = session.get(AgentRun, run_id)
+                if router_run.status is RunStatus.RUNNING:
+                    _close(session, router_run, RunStatus.FAILED if failed_detail else RunStatus.COMPLETED,
+                           failed_detail)
+
+
+def _new_blocking_questions(session: Session, scope, run: AgentRun) -> list[modeling.RecordView]:
+    """Open blocking questions that the run created or changed."""
+    seqs = list(run.changeset_seqs or [])
+    if not seqs:
+        return []
+    ids = list(set(session.scalars(select(QuestionRevision.record_id).where(
+        QuestionRevision.tenant_id == scope.tenant_id, QuestionRevision.project_id == scope.project_id,
+        QuestionRevision.seq.in_(seqs)))))
+    if not ids:
+        return []
+    current = modeling._latest(session, scope, modeling.RecordType.QUESTION,
+                               as_of=modeling.current_seq(session, scope), record_ids=ids)
+    return [q for q in current if q.data.get("status") == QuestionStatus.OPEN.value and q.data.get("is_blocking")]
+
+
+def _chain_stop(session: Session, scope, child: AgentRun) -> str | None:
+    """Why the Architect shouldn't design on top of the Business Requirements run, or None."""
+    label = AGENT_LABELS.get(child.agent, child.agent)
+    if child.status is not RunStatus.COMPLETED:
+        return (f"I didn't start the Architect, because the {label} agent didn't finish "
+                f"({child.status_detail or child.status}). Send the message again when you're ready.")
+    blocking = _new_blocking_questions(session, scope, child)
+    if blocking:
+        codes = ", ".join(q.code or "a question" for q in blocking)
+        return (f"I didn't start the Architect, because the {label} agent raised a blocking question "
+                f"({codes}). Answer it first, then ask for the design change; the Architect would "
+                f"otherwise design on a meaning that isn't settled.")
+    return None
+
+
+def handoff_note(session: Session, child: AgentRun) -> str:
+    """What the earlier agent did, built from its tool activity (record codes and actions), never
+    from its reply text."""
+    reply = session.scalar(select(ConversationMessage).where(
+        ConversationMessage.run_id == child.id, ConversationMessage.role == MessageRole.ASSISTANT).limit(1))
+    by_action: dict[str, list[str]] = {}
+    for item in (reply.activity if reply else []) or []:
+        record = item.get("record") if item.get("ok") else None
+        if record and record.get("code"):
+            codes = by_action.setdefault(record.get("action") or "changed", [])
+            if record["code"] not in codes:
+                codes.append(record["code"])
+    label = AGENT_LABELS.get(child.agent, child.agent)
+    done = "; ".join(f"{action} {', '.join(codes)}" for action, codes in by_action.items())
+    return (f"The {label} agent handled this message first and its register changes are committed"
+            + (f" ({done})" if done else " (it changed no register entries)")
+            + ". Design from the registers as they are now; the design part of the message is yours.")
+
+
+def _stop_chain(session: Session, run: AgentRun, conversation: Conversation, emit: Emit,
+                held: list[dict[str, Any]], text: str) -> None:
+    """End the turn after the first agent: the router's note is the last reply, and the first
+    agent's held "done" ends the stream with the chain marked stopped."""
+    next_ordinal = (session.scalar(select(ConversationMessage.ordinal).where(
+        ConversationMessage.conversation_id == conversation.id)
+        .order_by(ConversationMessage.ordinal.desc()).limit(1)) or 0) + 1
+    note = ConversationMessage(tenant_id=run.tenant_id, project_id=run.project_id,
+                               conversation_id=conversation.id, ordinal=next_ordinal, role=MessageRole.ASSISTANT,
+                               text=text, attachments=[], activity=[], run_id=run.id, author_id=run.id)
+    session.add(note)
+    session.commit()
+    for event in held or [{"type": "done", "status": str(RunStatus.COMPLETED), "detail": None}]:
+        emit({**event, "chain_stopped": text, "note_message_id": str(note.id)})

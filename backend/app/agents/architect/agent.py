@@ -107,12 +107,14 @@ def run_design(
     max_attempts: int = 3,
     tot: search.Settings | None = None,
     max_decision_points: int = 2,
+    handoff: str | None = None,
 ) -> None:
     """Execute one Architect run. `requirements_model` drives the Business Requirements
     subgraph behind ask_requirements; `validator_model` drives the Validator review. Without a
     Validator the design is applied or proposed unreviewed and stays Draft. `tot` enables the
     bounded search at decision points (None: the single-candidate baseline). Never raises:
-    outcomes are recorded on the run, the candidate and the assistant message."""
+    outcomes are recorded on the run, the candidate and the assistant message. `handoff` is
+    the router's note when the Business Requirements agent handled the same message first."""
     with session_factory() as session:
         run = session.get(AgentRun, run_id)
         conversation = session.get(Conversation, run.conversation_id)
@@ -150,7 +152,9 @@ def run_design(
         transcript.append({
             "role": "user",
             "text": f"<project_context>\n{_context_block(session, scope, model, ctx, empty_at_start)}\n"
-                    f"</project_context>\n\n{user_msg.text}",
+                    f"</project_context>\n\n"
+                    + (f"<handoff>\n{handoff}\n</handoff>\n\n" if handoff else "")
+                    + user_msg.text,
         })
 
         loop = Loop(session=session, run=run, chat_model=chat_model, system_prompt=SYSTEM_PROMPT,

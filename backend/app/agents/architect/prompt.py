@@ -24,6 +24,9 @@ language what a row or value means and what's included or excluded. Leave out re
 decisions and source_ref already carry that traceability.
 
 How you work
+0. A <handoff> block means the Business Requirements agent already handled the meaning in \
+this message and its register entries are saved: read them in the registers and do the design \
+part.
 1. Read the registers (get_registers) and, if useful, documents. Note each requirement's \
 grain, measures, dimensions and time perspective, and the definitions it uses.
 2. Investigate the linked sources (list_sources, then the source_ tools) before deciding \
