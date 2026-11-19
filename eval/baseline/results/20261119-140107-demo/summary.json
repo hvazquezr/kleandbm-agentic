@@ -1,0 +1,41 @@
+{
+ "baseline": {
+  "runs": 1,
+  "completed": 1,
+  "rubric": {
+   "active_customers_feasible": 1,
+   "at_most_two_questions": 1,
+   "average_basket_feasible": 1,
+   "expected_dimensions": 1,
+   "facts_declare_grain": 1,
+   "marketplace_noticed": 1,
+   "net_sales_feasible": 1,
+   "nothing_confirmed_by_agents": 1,
+   "order_line_sales_fact": 1,
+   "refund_grain_returns_fact": 1,
+   "returns_timing_question": 1
+  },
+  "rubric_score": 1.0,
+  "ready_for_review": 0,
+  "blockers": 2.0,
+  "findings": {
+   "passed": 13.0,
+   "failed": 0.0,
+   "unverified": 2.0
+  },
+  "review_rounds": 1.0,
+  "tables": 8.0,
+  "questions": 2.0,
+  "decision_points": 0,
+  "search_outcomes": {},
+  "seconds": 464.0,
+  "model_calls": 35.0,
+  "output_tokens": 40272.0,
+  "input_tokens": 301787.0,
+  "search_output_tokens": 0.0,
+  "cost_usd": null,
+  "monitor_score": 38.0,
+  "monitor_flagged": 0,
+  "monitor_untrusted_found": 0.0
+ }
+}
