@@ -31,7 +31,7 @@ def last_result(transcript) -> dict:
 
 
 @pytest.fixture
-def proj(as_user, client, monkeypatch):
+def proj(as_user, client, monkeypatch, single_agent_conversation):
     monkeypatch.setattr(get_settings(), "secrets_key", Fernet.generate_key().decode())
     connector = FakeConnector()
     client.app.state.source_connector = connector
@@ -56,7 +56,9 @@ def proj(as_user, client, monkeypatch):
     p = P()
     p.alice, p.base, p.model, p.source, p.client, p.connector = alice, base, model, source["id"], client, connector
     p.revenue_req, p.profit_req = req["created"]["r"], req["created"]["p"]
-    p.conv = alice.post(f"{base}/conversations", json={"model_id": model, "agent": "architect"}).json()
+    # The Architect on its own; Assistant conversations (test_router) route to it.
+    p.single_agent = lambda agent: single_agent_conversation(base, "auth0|alice", model_id=model, agent=agent)
+    p.conv = p.single_agent("architect")
 
     def factory_for(models):
         def factory(agent):
@@ -351,9 +353,14 @@ def test_agents_may_revise_feasibility_but_not_meaning_of_confirmed_requirements
                                                          data={"statement": "Something else"})])
 
 
-def test_architect_conversations_need_a_model(proj):
-    resp = proj.alice.post(f"{proj.base}/conversations", json={"agent": "architect"})
-    assert resp.status_code == 409 and "data model" in resp.json()["detail"]
+def test_the_api_refuses_single_agent_conversations(proj):
+    for body in ({"agent": "architect", "model_id": proj.model}, {"agent": "business_requirements"}):
+        resp = proj.alice.post(f"{proj.base}/conversations", json=body)
+        assert resp.status_code == 409 and "Assistant" in resp.json()["detail"]
+    resp = proj.alice.post(f"{proj.base}/conversations", json={})
+    assert resp.status_code == 409 and "data model" in resp.json()["detail"]  # an Assistant needs a model
+    created = proj.alice.post(f"{proj.base}/conversations", json={"model_id": proj.model}).json()
+    assert created["agent"] == "assistant" and created["title"] == "Assistant"
     assert proj.conv["title"] == "Architect"
 
 

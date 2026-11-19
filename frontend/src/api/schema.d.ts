@@ -1345,7 +1345,7 @@ export interface components {
         ConversationIn: {
             /**
              * Agent
-             * @default business_requirements
+             * @default assistant
              */
             agent: string;
             /** Model Id */
@@ -1690,6 +1690,8 @@ export interface components {
             agent?: ("business_requirements" | "architect") | null;
             /** Attachment Version Ids */
             attachment_version_ids?: string[];
+            /** Instead Of Run Id */
+            instead_of_run_id?: string | null;
             /**
              * Text
              * @default
@@ -1720,6 +1722,7 @@ export interface components {
             ordinal: number;
             /** Role */
             role: string;
+            route?: components["schemas"]["RouteOut"] | null;
             /** Run Id */
             run_id: string | null;
             /** Text */
@@ -2132,6 +2135,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Overrides Run Id */
+            overrides_run_id?: string | null;
             /** Reason */
             reason: string;
             /** Route */

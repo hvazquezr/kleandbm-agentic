@@ -67,7 +67,8 @@ export default function ModelEditor() {
   const [menu, setMenu] = useState<{ target: CanvasMenuTarget; x: number; y: number } | null>(null);
   const [ask, confirmDialog] = useConfirm();
   const [localLayout, setLocalLayout] = useState<Positions>({});
-  const [agent, setAgent] = useState<AgentName>("business_requirements");
+  // Actions with a known target (Ask the Architect, Answer) send the next message straight to it.
+  const [sendTo, setSendTo] = useState<{ agent: AgentName; n: number } | null>(null);
   const [focusCandidate, setFocusCandidate] = useState<string | undefined>(undefined);
   // Bumped to start an Architect draft run in the (always mounted) Architect panel.
   const [draftRequest, setDraftRequest] = useState(0);
@@ -75,6 +76,7 @@ export default function ModelEditor() {
   // "Answer" on a question: prefill the Requirements chat (n repeats it for the same question).
   const [answering, setAnswering] = useState<{ text: string; n: number } | null>(null);
   const linkedSources = useModelSources(path, modelId);
+  const directTo = (agent: AgentName) => setSendTo((prev) => ({ agent, n: (prev?.n ?? 0) + 1 }));
 
   const role = project.data?.role;
   const canEdit = role !== undefined && role !== "viewer";
@@ -179,9 +181,8 @@ export default function ModelEditor() {
     setMenu({ target, ...at });
   }, []);
   const toggleDrawer = (d: DrawerName) => setDrawer((cur) => (cur === d ? null : d));
-  const askArchitect = () => { setAgent("architect"); setDrawer("assistant"); };
+  const askArchitect = () => { directTo("architect"); setDrawer("assistant"); };
   const generateDraft = useCallback(() => {
-    setAgent("architect");
     setDrawer("assistant");
     setDraftRequest((n) => n + 1);
   }, []);
@@ -340,35 +341,25 @@ export default function ModelEditor() {
         width={DRAWER_WIDTH.assistant}
         onClose={() => setDrawer(null)}
         title={<><Bot className="size-4" /> AI Assistant</>}
-        actions={
-          <div className="flex rounded-md border p-0.5 text-xs" role="tablist" aria-label="Agent">
-            {([["business_requirements", "Requirements"], ["architect", "Architect"]] as const).map(([value, label]) => (
-              <button key={value} type="button" role="tab" aria-selected={agent === value}
-                className={`px-2 py-0.5 rounded ${agent === value ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                onClick={() => setAgent(value)}>{label}</button>
-            ))}
-          </div>
-        }
       >
         <div className="flex-1 min-h-0 flex flex-col p-4">
-          {(["business_requirements", "architect"] as const).map((a) => (
-            <AssistantPanel
-              key={a}
-              agent={a}
-              path={path}
-              modelId={modelId}
-              canEdit={canEdit && viewingSeq === undefined}
-              className={agent === a ? "flex-1" : "hidden"}
-              startDraft={a === "architect" ? draftRequest : 0}
-              draft={a === "business_requirements" ? answering?.text : undefined}
-              draftKey={a === "business_requirements" ? answering?.n : undefined}
-              onSelectRecord={selectRecord}
-              onCandidate={onCandidate}
-              canViewRuns={canEdit}
-              onOpenRun={(runId) => setRunFocus({ runId })}
-              onOpenReview={(candidateId) => { setFocusCandidate(candidateId); setDrawer("review"); }}
-            />
-          ))}
+          <AssistantPanel
+            agent="assistant"
+            path={path}
+            modelId={modelId}
+            canEdit={canEdit && viewingSeq === undefined}
+            className="flex-1"
+            startDraft={draftRequest}
+            draft={answering?.text}
+            draftKey={answering?.n}
+            sendTo={sendTo?.agent}
+            sendToKey={sendTo?.n}
+            onSelectRecord={selectRecord}
+            onCandidate={onCandidate}
+            canViewRuns={canEdit}
+            onOpenRun={(runId) => setRunFocus({ runId })}
+            onOpenReview={(candidateId) => { setFocusCandidate(candidateId); setDrawer("review"); }}
+          />
         </div>
       </Drawer>
       {drawer === "review" && (
@@ -462,7 +453,7 @@ export default function ModelEditor() {
         canEdit={canEdit && viewingSeq === undefined}
         onAnswer={(q) => {
           setRegistersOpen(null);
-          setAgent("business_requirements");
+          directTo("business_requirements");
           setDrawer("assistant");
           setAnswering((prev) => ({ text: `Answer to ${q.code ?? "the question"}: `, n: (prev?.n ?? 0) + 1 }));
         }}
@@ -724,14 +715,14 @@ function EmptyCanvas({ readOnly, requirements, openQuestions, sources, onGenerat
           <>
             <div className="flex flex-wrap justify-center gap-2">
               <Button onClick={onGenerate} disabled={requirements === 0}
-                title={requirements === 0 ? "Record requirements first, with the Requirements agent" : undefined}>
+                title={requirements === 0 ? "Record requirements first: describe them in the AI Assistant" : undefined}>
                 <Sparkles className="size-4" /> Generate draft model
               </Button>
               <Button variant="outline" onClick={onAddTable}><Plus className="size-4" /> Add a table</Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {requirements === 0
-                ? "The Architect designs from the requirements. Record them with the AI Assistant's Requirements agent first."
+                ? "The Architect designs from the requirements. Describe them in the AI Assistant first; it records them with the Requirements agent."
                 : sources === 0
                   ? "With no linked source, the Architect designs from the registers only and marks the design unverified against data."
                   : "The Architect designs from the requirements and checks the linked data. It takes a few minutes; you can follow it in the AI Assistant."}

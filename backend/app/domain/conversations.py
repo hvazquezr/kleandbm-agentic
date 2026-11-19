@@ -28,11 +28,19 @@ def _user(scope: ProjectScope) -> uuid.UUID:
 
 
 def create_conversation(
-    session: Session, scope: ProjectScope, *, agent: str, model_id: uuid.UUID | None, title: str | None
+    session: Session, scope: ProjectScope, *, agent: str, model_id: uuid.UUID | None, title: str | None,
+    single_agent: bool = False,
 ) -> Conversation:
+    """A model's conversation is an Assistant conversation, where the request router picks the
+    agent per message (migration 0021 merged the earlier per-agent ones). `single_agent=True`
+    creates a conversation with one agent; the API never passes it, so only code that exercises
+    one agent on its own (the agent tests) can."""
     scope.require(Permission.PROJECT_EDIT)
     if agent not in AGENTS:
         raise InvalidOperation(f"unknown agent {agent!r}")
+    if agent != ROUTED and not single_agent:
+        raise InvalidOperation("conversations go through the Assistant: create one with agent \"assistant\" "
+                               "and a model, and send a message with `agent` to reach one agent directly")
     if agent in ("architect", ROUTED) and model_id is None:
         raise InvalidOperation(f"an {AGENTS[agent]} conversation belongs to a data model")
     if model_id is not None:
@@ -88,6 +96,7 @@ def start_turn(
     attachment_version_ids: list[uuid.UUID],
     llm_model: str,
     target: str | None = None,
+    instead_of: uuid.UUID | None = None,
 ) -> tuple[AgentRun, bool]:
     """Store the user's message and create the run that will answer it (in an Assistant
     conversation, the router run). `target` sends an Assistant message straight to one agent.
@@ -96,6 +105,12 @@ def start_turn(
     conversation = get_conversation(session, scope, conversation_id)
     if target is not None and (conversation.agent != ROUTED or target not in TARGETS):
         raise InvalidOperation("only an Assistant conversation sends a message to a chosen agent")
+    if instead_of is not None:
+        earlier = session.get(AgentRun, instead_of)
+        if (target is None or earlier is None or earlier.tenant_id != scope.tenant_id
+                or earlier.project_id != scope.project_id or earlier.conversation_id != conversation.id
+                or routing_decision(session, scope, instead_of) is None):
+            raise InvalidOperation("instead_of must name an earlier routed turn of this conversation, with a chosen agent")
     text, redacted = redact_credentials(text)  # before it's stored or sent anywhere
     if not text.strip() and not attachment_version_ids:
         raise InvalidOperation("the message is empty")
@@ -134,6 +149,16 @@ def routing_decision(session: Session, scope: ProjectScope, run_id: uuid.UUID) -
     return session.scalar(select(RoutingDecision).where(
         RoutingDecision.tenant_id == scope.tenant_id, RoutingDecision.project_id == scope.project_id,
         RoutingDecision.run_id == run_id))
+
+
+def routing_decisions(session: Session, scope: ProjectScope, run_ids: list[uuid.UUID]) -> dict[uuid.UUID, RoutingDecision]:
+    """The routing decisions of these router runs, by run id."""
+    scope.require(Permission.PROJECT_READ)
+    if not run_ids:
+        return {}
+    return {d.run_id: d for d in session.scalars(select(RoutingDecision).where(
+        RoutingDecision.tenant_id == scope.tenant_id, RoutingDecision.project_id == scope.project_id,
+        RoutingDecision.run_id.in_(run_ids)))}
 
 
 def message_runs(session: Session, scope: ProjectScope, run_ids: list[uuid.UUID]) -> dict[uuid.UUID, AgentRun]:

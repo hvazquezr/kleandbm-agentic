@@ -14,7 +14,7 @@ from tests.test_architect import _fix_seq, design_steps, last_result, proj, sse 
 
 
 def _br_conversation(proj):
-    return proj.alice.post(f"{proj.base}/conversations", json={"model_id": proj.model}).json()
+    return proj.single_agent("business_requirements")
 
 
 def _send(proj, conv, text="go"):

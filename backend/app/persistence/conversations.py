@@ -312,6 +312,10 @@ class RoutingDecision(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False)  # router | user
     router_model: Mapped[str | None] = mapped_column(String(128))
+    # The earlier router run in the same conversation whose choice the user overrode by sending
+    # the same message to the other agent ("send to the other agent instead"). Validated when
+    # the turn starts; kept as a plain id so the record survives like every other decision.
+    overrides_run_id: Mapped[uuid.UUID | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

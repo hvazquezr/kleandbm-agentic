@@ -31,13 +31,13 @@ def tool_result(transcript, index: int = -1) -> dict:
 
 
 @pytest.fixture
-def proj(as_user, client):
+def proj(as_user, client, single_agent_conversation):
     alice = as_user("auth0|alice")
     tenant = alice.post("/tenants", json={"name": "Northstar"}).json()["id"]
     project = alice.post(f"/tenants/{tenant}/projects", json={"name": "Discovery"}).json()["id"]
     base = f"/tenants/{tenant}/projects/{project}"
     model = alice.post(f"{base}/models", json={"name": "Retail"}).json()["id"]
-    conv = alice.post(f"{base}/conversations", json={"model_id": model}).json()
+    conv = single_agent_conversation(base, "auth0|alice", model_id=model)  # the agent on its own
 
     class P:
         pass
@@ -241,7 +241,7 @@ def test_agents_cannot_confirm_or_alter_confirmed_meanings(proj, db_session_fact
         s.commit()
 
 
-def test_conversations_are_scoped_and_role_checked(proj, as_user):
+def test_conversations_are_scoped_and_role_checked(proj, as_user, single_agent_conversation):
     proj.script({"text": "Hi."})
     proj.send(proj.alice, "Hello")
 
@@ -255,7 +255,7 @@ def test_conversations_are_scoped_and_role_checked(proj, as_user):
     assert bob.get(f"{proj.base}/conversations/{proj.conv['id']}/messages").status_code == 404
     tb = bob.post("/tenants", json={"name": "Globex"}).json()["id"]
     pb = bob.post(f"/tenants/{tb}/projects", json={"name": "Ops"}).json()["id"]
-    bob_conv = bob.post(f"/tenants/{tb}/projects/{pb}/conversations", json={}).json()
+    bob_conv = single_agent_conversation(f"/tenants/{tb}/projects/{pb}", "auth0|bob")
     # Bob can't attach Alice's document to his own conversation.
     alice_doc = proj.upload("secret.txt", b"Confidential margin rules.")
     resp = bob.post(f"/tenants/{tb}/projects/{pb}/conversations/{bob_conv['id']}/messages",

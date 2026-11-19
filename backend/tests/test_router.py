@@ -71,7 +71,7 @@ def test_the_router_never_reads_agent_replies(proj):
     send(proj, conv, "Exclude freight from it.")
     brief = models["router"].calls[1]["transcript"][-1]["text"]
     assert secret not in brief
-    assert "- User: Define net sales. → answered by Requirements" in brief
+    assert "- User: Define net sales. → answered by Requirements agent" in brief
     assert "<project_state>" in brief and "Requirements: 2" in brief and "Model tables: 0 (empty model)" in brief
 
 
@@ -339,3 +339,29 @@ def test_a_consultation_inside_an_architect_step_keeps_its_own_agent(proj):
         {"type": "tool", "status": "ok", "name": "search_documents", "agent": "business_requirements", "step": "architect"},
         {"type": "text", "text": "Designing.", "agent": "architect", "step": "architect"},
     ]
+
+
+def test_messages_carry_their_route_and_an_override_is_recorded(proj):
+    conv, models = assistant(proj, [route("requirements", "It defines a term.")],
+                             requirements_steps=[{"text": "Recorded."}])
+    models["architect"].steps.extend(_fix_seq(proj, design_steps(proj)))
+    first = send(proj, conv, "Add vendor to the model")
+    user = messages(proj, conv)[0]
+    assert user["route"]["route"] == "requirements" and user["route"]["reason"] == "It defines a term."
+    assert all(m["route"] is None for m in messages(proj, conv) if m["role"] == "assistant")
+
+    # The user sends the same message to the Architect instead; the override is recorded.
+    events = send(proj, conv, "Add vendor to the model", agent="architect", instead_of_run_id=first[0]["run_id"])
+    assert models["router"].calls[1:] == []
+    again = messages(proj, conv)[2]
+    assert again["route"]["source"] == "user" and again["route"]["overrides_run_id"] == first[0]["run_id"]
+    assert again["route"]["reason"] == "You sent this to the Architect instead of the Requirements agent."
+    assert proj.alice.get(f"{proj.base}/agent-runs/{events[0]['run_id']}").json()["route"]["overrides_run_id"] == first[0]["run_id"]
+
+    # An override must name an earlier routed turn of this conversation, and a chosen agent.
+    bad = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages",
+                          json={"text": "x", "agent": "architect", "instead_of_run_id": proj.conv["id"]})
+    assert bad.status_code == 409
+    no_target = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages",
+                                json={"text": "x", "instead_of_run_id": first[0]["run_id"]})
+    assert no_target.status_code == 409

@@ -225,7 +225,9 @@ function RequirementsStep({ path, modelId, draft, onBack, onNext }: {
         Chat with the Business Requirements agent. We've drafted an opening message from your context; edit it and send when ready.
         Answer the agent's questions as far as you can. Anything still open stays recorded as a question.
       </p>
-      <AssistantPanel path={path} modelId={modelId} canEdit draft={draft} className="h-[520px]" />
+      {/* The model's Assistant thread, with every message sent to the Requirements agent: the
+          conversation carries on in the editor. */}
+      <AssistantPanel path={path} modelId={modelId} agent="assistant" lockTarget="business_requirements" canEdit draft={draft} className="h-[520px]" />
       <Footer onBack={onBack}><Button onClick={onNext}>Next <ArrowRight className="size-4" /></Button></Footer>
     </CardContent></Card>
   );

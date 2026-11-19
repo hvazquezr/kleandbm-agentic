@@ -58,7 +58,13 @@ export async function sendAgentMessage(
   path: { tenant_id: string; project_id: string },
   conversationId: string,
   /** `agent` sends the message straight to one agent of an Assistant conversation, skipping the router. */
-  body: { text: string; attachment_version_ids: string[]; agent?: "business_requirements" | "architect" },
+  body: {
+    text: string;
+    attachment_version_ids: string[];
+    agent?: "business_requirements" | "architect";
+    /** With `agent`: the earlier turn's run whose route this overrides ("send to the other agent instead"). */
+    instead_of_run_id?: string;
+  },
   onEvent: (e: AgentEvent) => void,
 ): Promise<void> {
   const resp = await fetch(

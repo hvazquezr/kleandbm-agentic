@@ -113,7 +113,8 @@ def set_up(user, scenario: Scenario, password: str, *, host: str = "127.0.0.1", 
     _ok(user.post(f"{base}/changesets", json={"operations": [
         {"op": "create", "type": "requirement", "data": {"statement": s, "origin_kind": "user_statement"}}
         for s in scenario.requirements]}))
-    conv = _ok(user.post(f"{base}/conversations", json={"model_id": model, "agent": "architect"}))["id"]
+    # The model's Assistant conversation; runs send their prompt straight to the Architect.
+    conv = _ok(user.post(f"{base}/conversations", json={"model_id": model}))["id"]
     return {"tenant": tenant, "project": project, "base": base, "model": model, "conversation": conv}
 
 

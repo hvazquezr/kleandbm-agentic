@@ -180,3 +180,28 @@ def _no_tracing_by_default(monkeypatch):
 
     monkeypatch.setattr(get_settings(), "langsmith_tracing", False)
     monkeypatch.setattr(get_settings(), "langsmith_api_key", "")
+
+
+@pytest.fixture
+def single_agent_conversation(db_session_factory):
+    """Create a conversation with one agent, as the user `sub`, for tests that exercise one agent
+    on its own. The API refuses these (one Assistant conversation per model); the domain makes
+    one only when asked with `single_agent=True`."""
+    from sqlalchemy import select
+
+    from app.domain import conversations, tenancy
+    from app.domain.access import Actor, ActorKind
+    from app.persistence.models import User
+
+    def _make(base: str, sub: str, *, model_id: str | None = None, agent: str = "business_requirements") -> dict:
+        _, tenant, _, project = base.strip("/").split("/")[:4]
+        with db_session_factory() as session:
+            user = session.scalar(select(User).where(User.auth_subject == sub))
+            scope = tenancy.resolve_project_scope(session, Actor(kind=ActorKind.USER, id=user.id),
+                                                  uuid.UUID(tenant), uuid.UUID(project))
+            c = conversations.create_conversation(session, scope, agent=agent, title=None, single_agent=True,
+                                                  model_id=uuid.UUID(model_id) if model_id else None)
+            session.commit()
+            return {"id": str(c.id), "model_id": model_id, "agent": c.agent, "title": c.title}
+
+    return _make

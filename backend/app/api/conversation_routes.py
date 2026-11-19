@@ -64,9 +64,10 @@ router = APIRouter(prefix="/tenants/{tenant_id}/projects/{project_id}", tags=["c
 
 
 class ConversationIn(BaseModel):
+    # An Assistant conversation belongs to a model; single-agent conversations are refused (409).
     model_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
-    agent: str = "business_requirements"
+    agent: str = "assistant"
 
 
 class ConversationOut(BaseModel):
@@ -83,6 +84,9 @@ class MessageIn(BaseModel):
     # Assistant conversations only: send the message straight to this agent instead of letting
     # the request router choose (an action with a known target, or "send to the other agent").
     agent: Literal["business_requirements", "architect"] | None = None
+    # With `agent`: the earlier turn (its router run) whose route this message overrides, when
+    # the user sends the same message to the other agent instead. Recorded on the decision.
+    instead_of_run_id: uuid.UUID | None = None
 
 
 class MessageOut(BaseModel):
@@ -99,6 +103,8 @@ class MessageOut(BaseModel):
     # The top-level run of the turn: the router run in an Assistant conversation, else run_id.
     # Monitor assessments are keyed by it.
     turn_run_id: uuid.UUID | None = None
+    # On a user message in an Assistant conversation: where the router (or the user) sent it.
+    route: "RouteOut | None" = None
     created_at: datetime
 
 
@@ -107,7 +113,17 @@ class RouteOut(BaseModel):
     reason: str
     source: str  # router | user
     router_model: str | None
+    # The earlier turn this one overrode ("send to the other agent instead").
+    overrides_run_id: uuid.UUID | None = None
     created_at: datetime
+
+
+MessageOut.model_rebuild()
+
+
+def _route_out(d) -> RouteOut | None:
+    return RouteOut(route=d.route, reason=d.reason, source=d.source, router_model=d.router_model,
+                    overrides_run_id=d.overrides_run_id, created_at=d.created_at) if d else None
 
 
 class RunOut(BaseModel):
@@ -238,14 +254,18 @@ def list_conversations(session: SessionDep, scope: ProjectScopeDep, model_id: uu
 def list_messages(conversation_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> list[MessageOut]:
     messages = conversations.list_messages(session, scope, conversation_id)
     runs = conversations.message_runs(session, scope, [m.run_id for m in messages if m.run_id])
+    routes = conversations.routing_decisions(
+        session, scope, [m.run_id for m in messages if m.run_id and str(m.role) == "user"])
     out = []
     for m in messages:
         r = runs.get(m.run_id)
+        user = str(m.role) == "user"
         out.append(MessageOut(
             id=m.id, ordinal=m.ordinal, role=str(m.role), text=m.text, attachments=list(m.attachments or []),
             activity=list(m.activity or []), run_id=m.run_id,
-            agent=r.agent if r and str(m.role) == "assistant" else None,
-            turn_run_id=(r.parent_run_id or r.id) if r else None, created_at=m.created_at))
+            agent=r.agent if r and not user else None,
+            turn_run_id=(r.parent_run_id or r.id) if r else None,
+            route=_route_out(routes.get(m.run_id)) if user else None, created_at=m.created_at))
     return out
 
 
@@ -258,8 +278,7 @@ def get_run(run_id: uuid.UUID, session: SessionDep, scope: ProjectScopeDep) -> R
         iterations=r.iterations, tool_calls=r.tool_calls, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
         cache_read_tokens=r.cache_read_tokens, cache_write_tokens=r.cache_write_tokens,
         changeset_seqs=list(r.changeset_seqs or []), started_at=r.started_at, finished_at=r.finished_at,
-        route=RouteOut(route=d.route, reason=d.reason, source=d.source, router_model=d.router_model,
-                       created_at=d.created_at) if (d := conversations.routing_decision(session, scope, r.id)) else None,
+        route=_route_out(conversations.routing_decision(session, scope, r.id)),
     )
 
 
@@ -343,6 +362,7 @@ def send_message(
     run, redacted = conversations.start_turn(
         session, scope, conversation_id, text=body.text,
         attachment_version_ids=body.attachment_version_ids, llm_model=llm_model, target=body.agent,
+        instead_of=body.instead_of_run_id,
     )
     session.commit()  # the run and user message must exist before the worker reads them
 
@@ -360,7 +380,8 @@ def send_message(
         try:
             if routed:
                 route_turn(app_state.session_factory, tenant_id=tenant_id, project_id=project_id, run_id=run_id,
-                           chat_model=chat_model, target=body.agent, runners=runners, emit=events.put)
+                           chat_model=chat_model, target=body.agent, runners=runners, emit=events.put,
+                           instead_of=body.instead_of_run_id)
             else:
                 runner.run(run_id, events.put, None)
         except Exception as exc:  # the runs record their own outcomes; this catches setup failures

@@ -1,8 +1,8 @@
-import { Bot, ChevronDown, ChevronRight, FileText, Loader2, MessageSquareText, Paperclip, ScrollText, Send, ShieldCheck, Sparkles, User, X, XCircle } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, ClipboardList, DraftingCompass, FileText, Loader2, MessageSquareText, Paperclip, Route, ScrollText, Send, ShieldCheck, Sparkles, User, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { toast } from "sonner";
-import { sendAgentMessage, uploadDocument, type AgentEvent } from "@/api/agent";
+import { sendAgentMessage, uploadDocument, type AgentEvent, type TurnAgent } from "@/api/agent";
 import { ApiError, type Assessment } from "@/api/client";
 import {
   useCandidates,
@@ -13,6 +13,7 @@ import {
   useInvalidateAfterAgent,
   useMessages,
   type AgentName,
+  type ConversationAgent,
   type ProjectPath,
 } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
@@ -89,7 +90,32 @@ const SUBAGENT_LABELS: Record<string, string> = {
   review: "Review",
 };
 
-const AGENTS: Record<AgentName, { title: string; intro: string[]; placeholder: string }> = {
+/** Who wrote a reply in an Assistant conversation: the icon and name shown on it. */
+const AUTHORS: Record<TurnAgent, { name: string; icon: typeof Bot; tone: string }> = {
+  business_requirements: { name: "Requirements agent", icon: ClipboardList, tone: "text-violet-400" },
+  architect: { name: "Architect", icon: DraftingCompass, tone: "text-emerald-400" },
+  router: { name: "Assistant", icon: Route, tone: "text-muted-foreground" },
+};
+
+const ROUTE_TEXT: Record<string, string> = {
+  requirements: "Sent to the Requirements agent",
+  architect: "Sent to the Architect",
+  requirements_then_architect: "Sent to the Requirements agent, then the Architect",
+  clarify: "Not sent to an agent yet",
+};
+
+type RouteInfo = { route: string; reason: string; source: string };
+type LiveStep = { agent?: TurnAgent; text: string; tools: ToolActivity[] };
+
+const AGENTS: Record<ConversationAgent, { title: string; intro: string[]; placeholder: string }> = {
+  assistant: {
+    title: "AI Assistant",
+    intro: [
+      "Ask in your own words. Each message goes to the agent that should answer it: the Requirements agent records requirements, definitions and open questions; the Architect designs the model from them and the linked data sources. A request that needs both goes to the Requirements agent first, then the Architect.",
+      "Each reply shows which agent wrote it, and each message says where it went and why, with a way to send it to the other agent instead. Nothing an agent records is confirmed, and no model is accepted, until a person does it.",
+    ],
+    placeholder: "Describe a requirement, answer a question, or ask for a design change…",
+  },
   business_requirements: {
     title: "Business Requirements agent",
     intro: [
@@ -126,6 +152,9 @@ export function AssistantPanel({
   draftKey = 0,
   startDraft = 0,
   agent = "business_requirements",
+  sendTo: sendToRequest,
+  sendToKey = 0,
+  lockTarget,
   canViewRuns = false,
   onOpenRun,
   onOpenReview,
@@ -143,7 +172,13 @@ export function AssistantPanel({
   draftKey?: number;
   /** Architect only: each new value starts a "design a draft model" run, unless one is running. */
   startDraft?: number;
-  agent?: AgentName;
+  agent?: ConversationAgent;
+  /** Assistant conversations: send the next message to this agent instead of letting the router choose. */
+  sendTo?: AgentName;
+  /** Changes each time `sendTo` should be applied again. */
+  sendToKey?: number;
+  /** Assistant conversations: every message goes to this agent (the wizard's requirements step). */
+  lockTarget?: AgentName;
   /** Transcripts and monitor assessments need edit access. */
   canViewRuns?: boolean;
   onOpenRun?: (runId: string) => void;
@@ -154,7 +189,8 @@ export function AssistantPanel({
   const conversations = useConversations(path, modelId);
   const createConversation = useCreateConversation(path);
   const conversation = conversations.data?.find((c) => c.agent === agent);
-  const info = AGENTS[agent];
+  const info = AGENTS[lockTarget ?? agent];
+  const routed = agent === "assistant";
   const messages = useMessages(path, conversation?.id);
   // The monitor reads a run after its reply is saved: wait a few minutes for the newest one.
   const newest = [...(messages.data ?? [])].reverse().find((m) => m.role === "assistant" && m.run_id);
@@ -162,7 +198,7 @@ export function AssistantPanel({
   const assessments = useConversationAssessments(path, conversation?.id, canViewRuns, waitFor ?? undefined);
   const assessmentOf = useMemo(() => new Map((assessments.data ?? []).map((a) => [a.run_id, a])), [assessments.data]);
   // The design each Architect run produced, so its reply can point to Review.
-  const candidates = useCandidates(path, modelId ?? "", agent === "architect" && !!modelId);
+  const candidates = useCandidates(path, modelId ?? "", agent !== "business_requirements" && !!modelId);
   const candidateOf = useMemo(() => new Map((candidates.data ?? []).filter((c) => c.run_id).map((c) => [c.run_id!, c])),
     [candidates.data]);
   const documents = useDocuments(path);
@@ -175,6 +211,14 @@ export function AssistantPanel({
   const [pending, setPending] = useState<{ text: string; attachments: Attachment[] } | null>(null);
   const [liveText, setLiveText] = useState("");
   const [liveTools, setLiveTools] = useState<ToolActivity[]>([]);
+  // A routed turn: where it went, the agents that already answered, and who's answering now.
+  const [liveRoute, setLiveRoute] = useState<RouteInfo | null>(null);
+  const [liveDone, setLiveDone] = useState<LiveStep[]>([]);
+  const [liveStep, setLiveStep] = useState<TurnAgent | undefined>();
+  const textNow = useRef("");
+  const toolsNow = useRef<ToolActivity[]>([]);
+  // "auto" lets the router choose; an agent name sends the next message straight to it.
+  const [sendTo, setSendTo] = useState<"auto" | AgentName>("auto");
   // The run being streamed. Mid-run refetches bring in its saved user message, which is
   // already shown as pending, so it's hidden from the history until the run ends.
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
@@ -191,13 +235,16 @@ export function AssistantPanel({
       el?.setSelectionRange(draft.length, draft.length);
     });
   }, [draft, draftKey]);
+  useEffect(() => {
+    if (sendToKey && sendToRequest) setSendTo(sendToRequest);
+  }, [sendToRequest, sendToKey]);
   // Start a requested draft once the conversation list is in, so the run reuses the existing
-  // Architect conversation instead of creating another.
+  // conversation instead of creating another. It goes straight to the Architect.
   const startedDraft = useRef(0);
   useEffect(() => {
-    if (agent !== "architect" || !canEdit || startDraft <= startedDraft.current || !conversations.isSuccess) return;
+    if (agent === "business_requirements" || !canEdit || startDraft <= startedDraft.current || !conversations.isSuccess) return;
     startedDraft.current = startDraft;
-    void send(DRAFT_PROMPT);
+    void send(DRAFT_PROMPT, { to: "architect" });
   });
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -227,28 +274,52 @@ export function AssistantPanel({
     }
   };
 
-  const send = async (override?: string) => {
+  const send = async (override?: string, opts: { to?: AgentName; insteadOf?: string } = {}) => {
     const body = (override ?? text).trim();
     if (running || (!body && attachments.length === 0)) return;
     const sending = { text: body, attachments };
+    const target = routed ? (opts.to ?? lockTarget ?? (sendTo === "auto" ? undefined : sendTo)) : undefined;
     setRunning(true);
     setPending(sending);
     setLiveText("");
     setLiveTools([]);
+    textNow.current = "";
+    toolsNow.current = [];
+    setLiveRoute(null);
+    setLiveDone([]);
+    setLiveStep(undefined);
+    if (!opts.to) setSendTo("auto");  // a chosen agent is for one message
     if (override === undefined) setText("");
     setAttachments([]);
     let candidateId: string | undefined;
     try {
       const conv = conversation ?? (await createConversation.mutateAsync({
-        model_id: modelId, agent, title: agent === "architect" ? "Architect" : "Requirements" }));
-      await sendAgentMessage(path, conv.id, { text: sending.text, attachment_version_ids: sending.attachments.map((a) => a.versionId) }, (e: AgentEvent) => {
-        if (e.type === "run") {
+        model_id: modelId, agent, title: AGENTS[agent].title }));
+      const track = (fn: (ts: ToolActivity[]) => ToolActivity[]) =>
+        setLiveTools((ts) => (toolsNow.current = fn(ts)));
+      await sendAgentMessage(path, conv.id, {
+        text: sending.text, attachment_version_ids: sending.attachments.map((a) => a.versionId),
+        ...(target ? { agent: target } : {}), ...(target && opts.insteadOf ? { instead_of_run_id: opts.insteadOf } : {}),
+      }, (e: AgentEvent) => {
+        if (e.step && e.step !== "router") setLiveStep(e.step);
+        if (e.type === "route") setLiveRoute({ route: e.route, reason: e.reason, source: e.source });
+        else if (e.type === "handoff") {
+          // The first agent's reply is saved; keep it on screen while the next agent works.
+          const done: LiveStep = { agent: e.from, text: textNow.current, tools: toolsNow.current };
+          setLiveDone((d) => [...d, done]);
+          setLiveText("");
+          setLiveTools([]);
+          textNow.current = "";
+          toolsNow.current = [];
+          setLiveStep(e.to);
+          invalidate();
+        } else if (e.type === "run") {
           setLiveRunId(e.run_id);
           if (e.redacted_credentials) toast.warning("Credentials were removed from your message before it was saved or sent. Add data sources on the Sources tab instead.");
         }
-        else if (e.type === "text") setLiveText((t) => t + e.text);
+        else if (e.type === "text") setLiveText((t) => (textNow.current = t + e.text));
         else if (e.type === "tool") {
-          setLiveTools((ts) => {
+          track((ts) => {
             const agent = subagent(e);
             if (e.status === "started") return [...ts, { name: e.name, status: "started", agent }];
             const copy = [...ts];
@@ -258,7 +329,7 @@ export function AssistantPanel({
           });
           if (e.status === "ok" && (e.record || e.name === "put_table")) invalidate();  // show changes as they happen
         } else if (e.type === "review") {
-          setLiveTools((ts) => {
+          track((ts) => {
             if (e.status === "started") return [...ts, { name: "review", status: "started", agent: "review",
               summary: `The Validator is reviewing the design${e.round ? ` again (round ${e.round})` : ""}` }];
             const copy = [...ts];
@@ -286,13 +357,30 @@ export function AssistantPanel({
       setPending(null);
       setLiveText("");
       setLiveTools([]);
+      setLiveRoute(null);
+      setLiveDone([]);
+      setLiveStep(undefined);
       setLiveRunId(null);
       setRunning(false);
       if (candidateId) onCandidate?.(candidateId);
     }
   };
 
-  const history = (messages.data ?? []).filter((m) => !(pending && liveRunId && m.run_id === liveRunId));
+  // Hide the streaming turn's saved messages (its user message and any reply already saved)
+  // until it ends: they're on screen as the live turn.
+  const history = (messages.data ?? []).filter((m) => !(pending && liveRunId && (m.turn_run_id ?? m.run_id) === liveRunId));
+  // A turn's run (transcript and assessment) is shown once, on its last reply.
+  const lastOfTurn = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const m of [...history].reverse()) {
+      const turn = m.turn_run_id ?? m.run_id;
+      if (m.role === "assistant" && turn && !seen.has(turn)) { seen.add(turn); lastOfTurn.add(m.id); }
+    }
+  }
+  const canRoute = routed && canEdit && !lockTarget && !running;
+  const sendInstead = (to: AgentName, messageText: string, turnRunId: string) =>
+    send(messageText, { to, insteadOf: turnRunId });
 
   return (
     <div className={cn("flex flex-col min-h-0", className)}>
@@ -301,29 +389,43 @@ export function AssistantPanel({
           <div className="text-sm text-muted-foreground space-y-2 rounded-md border border-dashed p-3">
             <p className="font-medium text-foreground flex items-center gap-2"><Bot className="size-4" /> {info.title}</p>
             {info.intro.map((line) => <p key={line}>{line}</p>)}
-            {agent === "architect" && canEdit && (
-              <Button size="sm" className="mt-1" disabled={running} onClick={() => send(DRAFT_PROMPT)}>
+            {agent !== "business_requirements" && !lockTarget && canEdit && (
+              <Button size="sm" className="mt-1" disabled={running} onClick={() => send(DRAFT_PROMPT, { to: "architect" })}>
                 <Sparkles className="size-4" /> Generate draft model
               </Button>
             )}
           </div>
         )}
-        {history.map((m) => (
+        {history.map((m) => {
+          const turn = m.turn_run_id ?? m.run_id;
+          return (
           <Message key={m.id} role={m.role} text={m.text}
+            author={routed && m.role === "assistant" ? (m.agent as TurnAgent | null) ?? undefined : undefined}
+            route={routed && !lockTarget && m.route ? (
+              <RouteLine route={m.route}
+                onSendInstead={canRoute && turn ? (to) => sendInstead(to, m.text, turn) : undefined} />
+            ) : undefined}
             attachments={m.attachments.map((id) => docLabels.get(id) ?? "attached document")}
             activity={fromSaved(m.activity)} onSelectRecord={onSelectRecord}
-            run={m.role === "assistant" && m.run_id && canViewRuns
-              ? { assessment: assessmentOf.get(m.run_id), onOpen: onOpenRun ? () => onOpenRun(m.run_id!) : undefined }
+            run={m.role === "assistant" && turn && canViewRuns && lastOfTurn.has(m.id)
+              ? { assessment: assessmentOf.get(turn), onOpen: onOpenRun ? () => onOpenRun(turn) : undefined }
               : undefined}
             design={m.role === "assistant" && m.run_id && candidateOf.get(m.run_id) && onOpenReview
               ? { status: candidateOf.get(m.run_id)!.status, canApply: canEdit,
                   onOpen: () => onOpenReview(candidateOf.get(m.run_id!)!.id) }
               : undefined} />
-        ))}
+          );
+        })}
         {pending && (
           <>
-            <Message role="user" text={pending.text || "(attached documents)"} attachments={pending.attachments.map((a) => a.label)} />
+            <Message role="user" text={pending.text || "(attached documents)"} attachments={pending.attachments.map((a) => a.label)}
+              route={liveRoute && !lockTarget ? <RouteLine route={liveRoute} /> : undefined} />
+            {liveDone.map((step, i) => (
+              <Message key={i} role="assistant" text={step.text || "(no reply text)"} author={step.agent} activity={step.tools}
+                onSelectRecord={onSelectRecord} />
+            ))}
             <div className="space-y-2">
+              {routed && liveStep && <AuthorLabel agent={liveStep} working />}
               <LiveActivity tools={liveTools} onSelectRecord={onSelectRecord} />
               {liveText ? (
                 <>
@@ -360,7 +462,7 @@ export function AssistantPanel({
             rows={3}
             value={text}
             disabled={running}
-            placeholder={info.placeholder}
+            placeholder={routed && !lockTarget && sendTo !== "auto" ? `Message for the ${AUTHORS[sendTo].name}…` : info.placeholder}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -375,7 +477,21 @@ export function AssistantPanel({
             <Button size="sm" variant="outline" disabled={running || uploading} onClick={() => fileInput.current?.click()}>
               {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />} Attach
             </Button>
-            <span className="text-xs text-muted-foreground">Enter to send · Shift+Enter for a new line</span>
+            {routed && !lockTarget ? (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground" role="radiogroup" aria-label="Send to">
+                <span>To</span>
+                <div className="flex rounded-md border p-0.5">
+                  {([["auto", "Auto"], ["business_requirements", "Requirements"], ["architect", "Architect"]] as const).map(([value, label]) => (
+                    <button key={value} type="button" role="radio" aria-checked={sendTo === value} disabled={running}
+                      title={value === "auto" ? "The assistant picks the agent" : `Send the next message to the ${AUTHORS[value].name}`}
+                      className={cn("px-1.5 py-0.5 rounded", sendTo === value ? "bg-accent text-foreground" : "hover:text-foreground")}
+                      onClick={() => setSendTo(value)}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">Enter to send · Shift+Enter for a new line</span>
+            )}
             <Button size="sm" className="ml-auto" disabled={running || uploading || (!text.trim() && attachments.length === 0)} onClick={() => send()}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Send
             </Button>
@@ -391,6 +507,8 @@ export function AssistantPanel({
 function Message({
   role,
   text,
+  author,
+  route,
   attachments = [],
   activity = [],
   onSelectRecord,
@@ -399,6 +517,10 @@ function Message({
 }: {
   role: string;
   text: string;
+  /** Assistant conversations: the agent that wrote the reply. */
+  author?: TurnAgent;
+  /** Assistant conversations: the route line under a user message. */
+  route?: React.ReactNode;
   attachments?: string[];
   activity?: ToolActivity[];
   onSelectRecord?: (id: string) => void;
@@ -408,10 +530,14 @@ function Message({
   design?: { status: string; canApply: boolean; onOpen: () => void };
 }) {
   const isUser = role === "user";
+  const Icon = author ? AUTHORS[author].icon : Bot;
   return (
     <div className={cn("flex gap-2", isUser && "flex-row-reverse")}>
-      <div className="mt-0.5 shrink-0 text-muted-foreground">{isUser ? <User className="size-4" /> : <Bot className="size-4" />}</div>
+      <div className={cn("mt-0.5 shrink-0 text-muted-foreground", author && AUTHORS[author].tone)}>
+        {isUser ? <User className="size-4" /> : <Icon className="size-4" aria-label={author ? AUTHORS[author].name : undefined} />}
+      </div>
       <div className={cn("min-w-0 space-y-1.5", isUser && "items-end flex flex-col")}>
+        {author && <p className={cn("text-xs font-medium", AUTHORS[author].tone)}>{AUTHORS[author].name}</p>}
         {activity.length > 0 && <ActivityList tools={activity} onSelectRecord={onSelectRecord} />}
         {isUser ? (
           <div className="rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words bg-primary/15">{text}</div>
@@ -429,6 +555,7 @@ function Message({
             ))}
           </div>
         )}
+        {route}
         {design?.status === "proposed" && (
           <div className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 py-1.5 text-xs">
             <span className="flex-1 min-w-0">These changes aren't in the model yet.</span>
@@ -568,6 +695,37 @@ function CurrentStep({ tool }: { tool: ToolActivity | undefined }) {
       <span className="truncate">
         {tool ? (tool.status === "started" ? (tool.summary ?? `${TOOL_LABELS[tool.name] ?? tool.name}…`) : tool.summary) : "Working…"}
       </span>
+    </div>
+  );
+}
+
+/** Who is answering a live routed turn. */
+function AuthorLabel({ agent, working }: { agent: TurnAgent; working?: boolean }) {
+  const a = AUTHORS[agent];
+  return (
+    <p className={cn("flex items-center gap-1.5 text-xs font-medium", a.tone)}>
+      <a.icon className="size-4" /> {a.name}{working && <span className="font-normal text-muted-foreground">is working…</span>}
+    </p>
+  );
+}
+
+/** Where a message went and why, with "send to the other agent instead". */
+function RouteLine({ route, onSendInstead }: { route: RouteInfo; onSendInstead?: (to: AgentName) => void }) {
+  const others: AgentName[] = route.route === "requirements" ? ["architect"]
+    : route.route === "architect" ? ["business_requirements"]
+    : route.route === "clarify" ? ["business_requirements", "architect"] : [];
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs text-muted-foreground max-w-full">
+      <span className="inline-flex items-center gap-1 min-w-0" title={route.reason}>
+        <Route className="size-3 shrink-0" />
+        <span className="font-medium">{ROUTE_TEXT[route.route] ?? route.route}</span>
+        <span className="truncate">· {route.reason}</span>
+      </span>
+      {onSendInstead && others.map((to) => (
+        <button key={to} type="button" className="underline-offset-2 hover:underline hover:text-foreground" onClick={() => onSendInstead(to)}>
+          {route.route === "clarify" ? `Send to the ${AUTHORS[to].name}` : `Send to the ${AUTHORS[to].name} instead`}
+        </button>
+      ))}
     </div>
   );
 }

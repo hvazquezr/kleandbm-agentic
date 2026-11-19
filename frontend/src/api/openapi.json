@@ -1327,7 +1327,7 @@
       "ConversationIn": {
         "properties": {
           "agent": {
-            "default": "business_requirements",
+            "default": "assistant",
             "title": "Agent",
             "type": "string"
           },
@@ -2262,6 +2262,18 @@
             "title": "Attachment Version Ids",
             "type": "array"
           },
+          "instead_of_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instead Of Run Id"
+          },
           "text": {
             "default": "",
             "maxLength": 20000,
@@ -2317,6 +2329,16 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "run_id": {
             "anyOf": [
@@ -3516,6 +3538,18 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "overrides_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overrides Run Id"
           },
           "reason": {
             "title": "Reason",

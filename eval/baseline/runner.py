@@ -28,14 +28,18 @@ def run_once(user, scenario: Scenario, variant: str, password: str, settings, *,
     settings.architect_tot_enabled = variant == "tot"
     started = time.monotonic()
     try:
-        resp = user.post(f"{ids['base']}/conversations/{ids['conversation']}/messages", json={"text": scenario.prompt})
+        resp = user.post(f"{ids['base']}/conversations/{ids['conversation']}/messages",
+                         json={"text": scenario.prompt, "agent": "architect"})
     finally:
         settings.architect_tot_enabled = previous
     seconds = time.monotonic() - started
     events = [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
     done = events[-1] if events and events[-1].get("type") == "done" else {"status": "failed", "detail": resp.text[:500]}
+    # The turn's top-level run (a router run with the Architect as its child): its tree holds
+    # every run's usage and transcript, the monitor assesses it, and it's the trace's root.
+    turn = events[0].get("run_id") if events and events[0].get("type") == "run" else None
     record = collect(fresh_user() if fresh_user else user, ids, done, seconds, markers=scenario.markers,
-                     monitored=settings.monitor_enabled)
+                     monitored=settings.monitor_enabled, turn_run_id=turn)
     record.update(variant=variant, scenario=scenario.name,
                   tools=[f"{e['status']}: {e['summary']}" for e in events if e.get("type") == "tool" and e.get("status") != "started"])
     record["grade"] = grade(record)
@@ -43,7 +47,8 @@ def run_once(user, scenario: Scenario, variant: str, password: str, settings, *,
 
 
 def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
-            markers: dict[str, str] | None = None, monitored: bool = False) -> dict[str, Any]:
+            markers: dict[str, str] | None = None, monitored: bool = False,
+            turn_run_id: str | None = None) -> dict[str, Any]:
     """Everything the comparison needs, read back through the API as a person would see it."""
     base = ids["base"]
     snap = user.get(f"{base}/models/{ids['model']}/snapshot").json()
@@ -93,8 +98,9 @@ def collect(user, ids: dict[str, Any], done: dict[str, Any], seconds: float, *,
                 "nodes": [{"depth": n["depth"], "stage": n["stage"], "status": n["status"], "choice": n["choice"],
                            "total": (n["evaluation"] or {}).get("total"), "reason": n["reason"]} for n in dp["nodes"]],
             })
-    run_id = (done.get("run") or {}).get("id")
-    record["ids"] = {**ids, "run_id": run_id}
+    agent_run_id = (done.get("run") or {}).get("id")
+    run_id = turn_run_id or agent_run_id
+    record["ids"] = {**ids, "run_id": run_id, "architect_run_id": agent_run_id}
     if run_id:
         record["usage"] = usage(user, base, run_id)
         record["monitor"] = monitor(user, base, run_id) if monitored else None
@@ -157,6 +163,9 @@ def usage(user, base: str, run_id: str) -> dict[str, Any]:
     pending = [run_id]
     while pending:
         run = user.get(f"{base}/agent-runs/{pending.pop()}").json()
+        pending += [str(c) for c in run["child_run_ids"]]
+        if not run["iterations"] and not any(run[k] for k in TOKENS):
+            continue  # a router run that made no model call (the message named its agent)
         a = by_agent.setdefault(run["agent"], {"runs": 0, "model_calls": 0, "tool_calls": 0, "llm_model": run["llm_model"],
                                                **{k: 0 for k in TOKENS}})
         a["runs"] += 1
@@ -164,7 +173,6 @@ def usage(user, base: str, run_id: str) -> dict[str, Any]:
         a["tool_calls"] += run["tool_calls"]
         for k in TOKENS:
             a[k] += run[k] or 0
-        pending += [str(c) for c in run["child_run_ids"]]
     total = {k: sum(a[k] for a in by_agent.values()) for k in ("model_calls", "tool_calls", *TOKENS)}
     return {"by_agent": by_agent, "total": total}
 

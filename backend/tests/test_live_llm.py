@@ -170,8 +170,8 @@ def test_architect_designs_northstar_from_the_real_source(as_user, client, monke
         for s_ in ["Monthly net revenue by channel, store and product category",
                    "Monthly returns by channel, store and product category",
                    "Profit by order"]]})
-    conv = alice.post(f"{base}/conversations", json={"model_id": model, "agent": "architect"}).json()
-    resp = alice.post(f"{base}/conversations/{conv['id']}/messages", json={"text": "Design the model."})
+    conv = alice.post(f"{base}/conversations", json={"model_id": model}).json()  # the model's Assistant
+    resp = alice.post(f"{base}/conversations/{conv['id']}/messages", json={"text": "Design the model.", "agent": "architect"})
     events = [json.loads(l[6:]) for l in resp.text.splitlines() if l.startswith("data: ")]
     done = events[-1]
     tools = [e for e in events if e["type"] == "tool" and e["status"] != "started"]

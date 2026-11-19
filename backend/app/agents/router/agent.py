@@ -55,7 +55,10 @@ ROUTES = ("requirements", "architect", "requirements_then_architect", "clarify")
 PLAN = {"requirements": ["business_requirements"], "architect": ["architect"],
         "requirements_then_architect": ["business_requirements", "architect"], "clarify": []}
 TARGETS = {"business_requirements": "requirements", "architect": "architect"}
-AGENT_LABELS = {"business_requirements": "Requirements", "architect": "Architect"}
+AGENT_LABELS = {"business_requirements": "Requirements agent", "architect": "Architect"}
+ROUTE_LABELS = {"requirements": "the Requirements agent", "architect": "the Architect",
+                "requirements_then_architect": "the Requirements agent and then the Architect",
+                "clarify": "the assistant asking which agent"}
 HISTORY_TURNS = 6
 FALLBACK_QUESTION = ("Should I record this as a business requirement or definition, or change the "
                      "data model? Reply with which you mean, or pick an agent when you send it.")
@@ -187,9 +190,11 @@ def route_turn(
     target: str | None,
     runners: RunnerFactory,
     emit: Emit,
+    instead_of: uuid.UUID | None = None,
 ) -> None:
     """Route one user message and run the agent that answers it. `target` (an agent name) skips
-    the model call. Never raises: outcomes are recorded on the runs and the conversation."""
+    the model call; `instead_of` names the earlier turn whose route the user overrode with it.
+    Never raises: outcomes are recorded on the runs and the conversation."""
     out = emit  # untagged; the turn's agents tag their own events below
     emit = tag(out, AGENT_NAME)
     with session_factory() as session:
@@ -208,8 +213,13 @@ def route_turn(
 
         with tracing.agent_run(run):
             if target:
-                decision = {"route": TARGETS[target], "reason": f"You sent this to the {AGENT_LABELS[target]}.",
-                            "question": None}
+                reason = f"You sent this to the {AGENT_LABELS[target]}."
+                earlier = session.scalar(select(RoutingDecision).where(RoutingDecision.run_id == instead_of)) \
+                    if instead_of else None
+                if earlier:
+                    reason = (f"You sent this to the {AGENT_LABELS[target]} instead of "
+                              f"{ROUTE_LABELS.get(earlier.route, earlier.route)}.")
+                decision = {"route": TARGETS[target], "reason": reason, "question": None}
                 source, router_model = "user", None
             else:
                 try:
@@ -232,7 +242,7 @@ def route_turn(
             reason = decision["reason"]
             session.add(RoutingDecision(tenant_id=run.tenant_id, project_id=run.project_id, run_id=run.id,
                                         route=decision["route"], reason=reason, source=source,
-                                        router_model=router_model))
+                                        router_model=router_model, overrides_run_id=instead_of if target else None))
             session.commit()
             emit({"type": "route", "route": decision["route"], "reason": reason, "source": source,
                   "agents": plan})
@@ -332,12 +342,12 @@ def _chain_stop(session: Session, scope, child: AgentRun) -> str | None:
     """Why the Architect shouldn't design on top of the Business Requirements run, or None."""
     label = AGENT_LABELS.get(child.agent, child.agent)
     if child.status is not RunStatus.COMPLETED:
-        return (f"I didn't start the Architect, because the {label} agent didn't finish "
+        return (f"I didn't start the Architect, because the {label} didn't finish "
                 f"({child.status_detail or child.status}). Send the message again when you're ready.")
     blocking = _new_blocking_questions(session, scope, child)
     if blocking:
         codes = ", ".join(q.code or "a question" for q in blocking)
-        return (f"I didn't start the Architect, because the {label} agent raised a blocking question "
+        return (f"I didn't start the Architect, because the {label} raised a blocking question "
                 f"({codes}). Answer it first, then ask for the design change; the Architect would "
                 f"otherwise design on a meaning that isn't settled.")
     return None
@@ -357,7 +367,7 @@ def handoff_note(session: Session, child: AgentRun) -> str:
                 codes.append(record["code"])
     label = AGENT_LABELS.get(child.agent, child.agent)
     done = "; ".join(f"{action} {', '.join(codes)}" for action, codes in by_action.items())
-    return (f"The {label} agent handled this message first and its register changes are committed"
+    return (f"The {label} handled this message first and its register changes are committed"
             + (f" ({done})" if done else " (it changed no register entries)")
             + ". Design from the registers as they are now; the design part of the message is yours.")
 

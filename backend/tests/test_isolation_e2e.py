@@ -131,7 +131,7 @@ def world(as_user, client, db_session_factory, monkeypatch):
         evidence = owner.post(f"{base}/sources/{source}/tools/list_tables", json={"arguments": {}}).json()["id"]
         conversation = owner.post(f"{base}/conversations", json={"model_id": model}).json()["id"]
         resp = owner.post(f"{base}/conversations/{conversation}/messages",
-                          json={"text": "hello", "attachment_version_ids": []})
+                          json={"text": "hello", "attachment_version_ids": [], "agent": "business_requirements"})
         run = next(json.loads(l[6:]) for l in resp.text.splitlines() if l.startswith("data: "))["run_id"]
         with db_session_factory() as session:
             scope = tenancy.resolve_project_scope(session, Actor(ActorKind.USER, owner.id),

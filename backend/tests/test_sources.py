@@ -420,12 +420,12 @@ def test_exception_groups_are_unwrapped():
     assert _first_leaf(leaf) is leaf
 
 
-def test_credentials_are_redacted_from_chat(proj, client):
+def test_credentials_are_redacted_from_chat(proj, client, single_agent_conversation):
     from app.adapters.llm import ScriptedChatModel
 
     model = ScriptedChatModel([{"text": "Please add the source on the Sources page."}])
     client.app.state.chat_model_factory = lambda *_: model
-    conv = proj.alice.post(f"{proj.base}/conversations", json={}).json()
+    conv = single_agent_conversation(proj.base, "auth0|alice")
     resp = proj.alice.post(f"{proj.base}/conversations/{conv['id']}/messages",
                            json={"text": "use mysql://northstar_ro:S3cret-Pass@127.0.0.1/northstar_ops"})
     first = [l for l in resp.text.splitlines() if l.startswith("data: ")][0]

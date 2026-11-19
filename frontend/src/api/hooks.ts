@@ -231,11 +231,13 @@ export function useConversations(path: ProjectPath, modelId: string | undefined)
 }
 
 export type AgentName = "business_requirements" | "architect";
+/** A conversation's kind: one agent, or "assistant", where the request router picks the agent per message. */
+export type ConversationAgent = AgentName | "assistant";
 
 export function useCreateConversation(path: ProjectPath) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { model_id?: string; title?: string; agent?: AgentName }) =>
+    mutationFn: (body: { model_id?: string; title?: string; agent?: ConversationAgent }) =>
       unwrap(api.POST("/tenants/{tenant_id}/projects/{project_id}/conversations", { params: { path }, body: { agent: "business_requirements", ...body } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", path.project_id] }),
   });

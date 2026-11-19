@@ -104,11 +104,11 @@ def test_reprocess_after_turning_on_image_reading_and_changing_embeddings(proj):
     assert names == {"notes.txt", "table-capture.png"}
 
 
-def test_agent_can_look_at_an_image(proj):
+def test_agent_can_look_at_an_image(proj, single_agent_conversation):
     proj.client.app.state.image_describer = None
     image = proj.upload("dashboard.png", png())
     text = proj.upload("notes.txt", b"plain text")
-    conv = proj.alice.post(f"{proj.base}/conversations", json={}).json()
+    conv = single_agent_conversation(proj.base, "auth0|alice")
     model = ScriptedChatModel([
         {"tool_calls": [{"name": "view_image", "input": {"version_id": image["id"]}}]},
         {"tool_calls": [{"name": "view_image", "input": {"version_id": text["id"]}}]},
