@@ -504,3 +504,16 @@ export function useReviewContentFlag(path: ProjectPath) {
     onSettled: () => qc.invalidateQueries({ queryKey: ["content-flags", path.project_id] }),
   });
 }
+
+/** Describe with AI: a suggested table for the New table form. Writes nothing; the user saves it. */
+export function useTableSuggestion(path: ProjectPath, modelId: string) {
+  return useMutation({
+    mutationFn: (description: string) =>
+      unwrap(
+        api.POST("/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/table-suggestions", {
+          params: { path: { ...path, model_id: modelId } },
+          body: { description },
+        }),
+      ),
+  });
+}

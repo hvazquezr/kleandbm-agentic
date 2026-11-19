@@ -705,6 +705,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/table-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Table Suggestion
+         * @description Describe with AI: a suggested table and attributes for the New table form, from one model
+         *     call. Nothing is written to the model; the user reviews it and saves it as their own edit.
+         *     503 when no model is configured or the model gives no valid table.
+         */
+        post: operations["create_table_suggestion_tenants__tenant_id__projects__project_id__models__model_id__table_suggestions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/versions": {
         parameters: {
             query?: never;
@@ -2371,6 +2393,30 @@ export interface components {
             recorded_at_seq: number | null;
             recorded_state: components["schemas"]["ModelState"];
         };
+        /** SuggestedAttribute */
+        SuggestedAttribute: {
+            additivity?: components["schemas"]["Additivity"] | null;
+            /** Description */
+            description?: string | null;
+            /** Is Nullable */
+            is_nullable: boolean;
+            logical_type: components["schemas"]["LogicalType"];
+            /** Name */
+            name: string;
+            role: components["schemas"]["AttributeRole"];
+        };
+        /** SuggestedTable */
+        SuggestedTable: {
+            /** Description */
+            description?: string | null;
+            /** Grain */
+            grain?: string | null;
+            kind: components["schemas"]["TableKind"];
+            /** Name */
+            name: string;
+            /** @default none */
+            scd_type: components["schemas"]["ScdType"];
+        };
         /** TableData */
         TableData: {
             /** Description */
@@ -2388,6 +2434,24 @@ export interface components {
          * @enum {string}
          */
         TableKind: "fact" | "dimension" | "bridge";
+        /** TableSuggestion */
+        TableSuggestion: {
+            /** Attributes */
+            attributes: components["schemas"]["SuggestedAttribute"][];
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            table: components["schemas"]["SuggestedTable"];
+        };
+        /** TableSuggestionIn */
+        TableSuggestionIn: {
+            /** Description */
+            description: string;
+        };
         /** TenantCreate */
         TenantCreate: {
             /** Name */
@@ -4132,6 +4196,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_table_suggestion_tenants__tenant_id__projects__project_id__models__model_id__table_suggestions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+                tenant_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TableSuggestionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableSuggestion"];
                 };
             };
             /** @description Validation Error */

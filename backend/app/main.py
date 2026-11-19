@@ -26,7 +26,7 @@ def _chat_model_from_settings(settings, agent: str = "business_requirements") ->
     """The chat model for one agent, from that agent's provider, model and effort settings."""
     prefix = {"business_requirements": "requirements_agent", "architect": "architect_agent",
               "validator": "validator_agent", "monitor": "monitor_agent",
-              "router": "router_agent"}[agent]
+              "router": "router_agent", "table_suggestion": "table_suggestion_agent"}[agent]
     provider = getattr(settings, f"{prefix}_provider")
     if agent == "monitor" and provider not in ("fake", "none") and provider == settings.architect_agent_provider:
         # A monitor from the Architect's own family shares its blind spots.

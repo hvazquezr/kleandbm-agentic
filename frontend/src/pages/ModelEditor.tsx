@@ -10,11 +10,11 @@ import type { TableValidation } from "@/components/canvas/TableNode";
 import type { AgentName } from "@/api/hooks";
 import { buildTrace } from "@/lib/trace";
 import { SourcesManager } from "@/components/sources/SourcesManager";
-import type { Schemas, Snapshot } from "@/api/client";
+import type { Snapshot } from "@/api/client";
 import { useModelSources, useModels, useProject, useSetLayout, useSnapshot } from "@/api/hooks";
 import ModelCanvas, { type CanvasMenuTarget, type ModelCanvasHandle } from "@/components/canvas/ModelCanvas";
 import { Drawer, LogoPill, Pill, TablesPanel, ToolButton, usePersistentFlag } from "@/components/editor/CanvasChrome";
-import { EnumSelect, Field } from "@/components/editor/fields";
+import { AddTableDialog } from "@/components/editor/AddTableDialog";
 import { NewRelationshipDialog } from "@/components/editor/NewRelationshipDialog";
 import { RecordActivity } from "@/components/editor/RecordActivity";
 import { RegistersPanel, type RegisterKey } from "@/components/editor/RegistersPanel";
@@ -25,11 +25,10 @@ import { useWrite } from "@/components/editor/useWrite";
 import { VersionsPanel } from "@/components/editor/VersionsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { STATE_LABELS, TABLE_KINDS } from "@/lib/labels";
 
@@ -498,9 +497,15 @@ export default function ModelEditor() {
       )}
       {addingTable && (
         <AddTableDialog
+          path={path}
+          modelId={modelId}
           onClose={() => setAddingTable(null)}
-          onCreate={async (data) => {
-            const result = await write([{ op: "create", type: "table", ref: "t", data }], { success: "Table created" });
+          onCreate={async (data, attributes) => {
+            // One changeset: the table and its attributes, all as the user's own edit.
+            const result = await write([
+              { op: "create", type: "table", ref: "t", data },
+              ...attributes.map((a, i) => ({ op: "create" as const, type: "attribute" as const, data: { ...a, table_id: "$t", ordinal: i } })),
+            ], { success: "Table created" });
             if (result) {
               setAddingTable(null);
               // Put the new table where the user is looking. The first table has no canvas
@@ -664,31 +669,6 @@ export function orientRelationship(
   const t = tables.get(target)?.data.kind;
   if (s === "dimension" && (t === "fact" || t === "bridge")) return { from: target, to: source };
   return { from: source, to: target };
-}
-
-function AddTableDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (d: Schemas["TableData"]) => Promise<void> }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<Schemas["TableData"]["kind"]>("dimension");
-  const [grain, setGrain] = useState("");
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>New table</DialogTitle></DialogHeader>
-        <form id="add-table" className="space-y-3"
-          onSubmit={(e) => { e.preventDefault(); if (name.trim()) onCreate({ name: name.trim(), kind, grain: grain.trim() || null, scd_type: "none" }); }}>
-          <Field label="Name"><Input autoFocus className="h-8" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. dim_customer" /></Field>
-          <Field label="Kind"><EnumSelect value={kind} options={TABLE_KINDS} onChange={(v) => v && setKind(v)} /></Field>
-          {kind === "fact" && (
-            <Field label="Grain"><Input className="h-8" value={grain} onChange={(e) => setGrain(e.target.value)} placeholder="One row per order line" /></Field>
-          )}
-        </form>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="add-table" disabled={!name.trim()}>Create</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 /** An empty model is never a dead end: draft it with the Architect, or start by hand. */

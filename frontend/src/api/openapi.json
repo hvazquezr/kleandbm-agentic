@@ -4244,6 +4244,103 @@
         "title": "StateOut",
         "type": "object"
       },
+      "SuggestedAttribute": {
+        "properties": {
+          "additivity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Additivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_nullable": {
+            "title": "Is Nullable",
+            "type": "boolean"
+          },
+          "logical_type": {
+            "$ref": "#/components/schemas/LogicalType"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AttributeRole"
+          }
+        },
+        "required": [
+          "name",
+          "logical_type",
+          "role",
+          "is_nullable"
+        ],
+        "title": "SuggestedAttribute",
+        "type": "object"
+      },
+      "SuggestedTable": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TableKind"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scd_type": {
+            "$ref": "#/components/schemas/ScdType",
+            "default": "none"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "SuggestedTable",
+        "type": "object"
+      },
       "TableData": {
         "additionalProperties": false,
         "properties": {
@@ -4300,6 +4397,58 @@
         ],
         "title": "TableKind",
         "type": "string"
+      },
+      "TableSuggestion": {
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestedAttribute"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "table": {
+            "$ref": "#/components/schemas/SuggestedTable"
+          }
+        },
+        "required": [
+          "run_id",
+          "table",
+          "attributes"
+        ],
+        "title": "TableSuggestion",
+        "type": "object"
+      },
+      "TableSuggestionIn": {
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "TableSuggestionIn",
+        "type": "object"
       },
       "TenantCreate": {
         "properties": {
@@ -7908,6 +8057,85 @@
           }
         ],
         "summary": "Get State History",
+        "tags": [
+          "modeling"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/projects/{project_id}/models/{model_id}/table-suggestions": {
+      "post": {
+        "description": "Describe with AI: a suggested table and attributes for the New table form, from one model\ncall. Nothing is written to the model; the user reviews it and saves it as their own edit.\n503 when no model is configured or the model gives no valid table.",
+        "operationId": "create_table_suggestion_tenants__tenant_id__projects__project_id__models__model_id__table_suggestions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableSuggestionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableSuggestion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Table Suggestion",
         "tags": [
           "modeling"
         ]

@@ -8,11 +8,14 @@ import uuid
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.adapters.llm import LLMError
+from app.agents.table_suggestion.agent import TableSuggestion, suggest_table
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.domain import modeling
+from app.domain.access import Permission
 from app.domain.modeling import Operation
 from app.domain.records import (
     AttributeData,
@@ -334,6 +337,28 @@ def set_state(
     model_id: uuid.UUID, body: StateIn, session: SessionDep, scope: ProjectScopeDep
 ) -> StateOut:
     return _state_out(modeling.set_state(session, scope, model_id, body.state, body.note, body.exceptions))
+
+
+class TableSuggestionIn(BaseModel):
+    description: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/models/{model_id}/table-suggestions")
+def create_table_suggestion(
+    model_id: uuid.UUID, body: TableSuggestionIn, request: Request, session: SessionDep, scope: ProjectScopeDep
+) -> TableSuggestion:
+    """Describe with AI: a suggested table and attributes for the New table form, from one model
+    call. Nothing is written to the model; the user reviews it and saves it as their own edit.
+    503 when no model is configured or the model gives no valid table."""
+    scope.require(Permission.PROJECT_EDIT)  # before building the model: 403/404, not 503
+    modeling.get_model(session, scope, model_id)
+    try:
+        chat_model = request.app.state.chat_model_factory("table_suggestion")
+        return suggest_table(session, scope, model_id, body.description, chat_model)
+    except LLMError as exc:
+        detail = " ".join(str(exc).split())  # the full error stays on the run
+        detail = detail if len(detail) <= 240 else detail[:239] + "…"
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Describe with AI isn't available: {detail}") from exc
 
 
 @router.get("/models/{model_id}/definition-dependencies")

@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     router_agent_provider: str = "anthropic"  # "anthropic" | "openai" | "fake" | "none"
     router_agent_model: str = "claude-haiku-5-5"
     router_agent_effort: str = "low"
+    # Describe with AI (app/agents/table_suggestion): one small model call that fills in the New
+    # table form from the user's description. It writes nothing; the user saves the table.
+    table_suggestion_agent_provider: str = "anthropic"  # "anthropic" | "openai" | "fake" | "none"
+    table_suggestion_agent_model: str = "claude-haiku-5-5"
+    table_suggestion_agent_effort: str = "low"
     # The transcript monitor (app/agents/monitor): after each top-level run, a model from another
     # family than the Architect reads the stored transcript and scores how likely it is that an
     # agent misbehaved. Triage only; a score at or above the threshold flags the run for review.
