@@ -174,7 +174,8 @@ export function AssistantPanel({
   startDraft?: number;
   agent?: ConversationAgent;
   /** Assistant conversations: send the next message to this agent instead of letting the router choose. */
-  sendTo?: AgentName;
+  /** Where the next message goes ("auto": the Router picks); focuses the composer. */
+  sendTo?: AgentName | "auto";
   /** Changes each time `sendTo` should be applied again. */
   sendToKey?: number;
   /** Assistant conversations: every message goes to this agent (the wizard's requirements step). */
@@ -236,7 +237,11 @@ export function AssistantPanel({
     });
   }, [draft, draftKey]);
   useEffect(() => {
-    if (sendToKey && sendToRequest) setSendTo(sendToRequest);
+    if (!sendToKey || !sendToRequest) return;
+    setSendTo(sendToRequest);
+    // After the frame and the closing menu's own focus handling, which runs on a timeout.
+    const id = setTimeout(() => composer.current?.focus(), 50);
+    return () => clearTimeout(id);
   }, [sendToRequest, sendToKey]);
   // Start a requested draft once the conversation list is in, so the run reuses the existing
   // conversation instead of creating another. It goes straight to the Architect.

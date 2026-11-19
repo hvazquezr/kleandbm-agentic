@@ -67,8 +67,9 @@ export default function ModelEditor() {
   const [menu, setMenu] = useState<{ target: CanvasMenuTarget; x: number; y: number } | null>(null);
   const [ask, confirmDialog] = useConfirm();
   const [localLayout, setLocalLayout] = useState<Positions>({});
-  // Actions with a known target (Ask the Architect, Answer) send the next message straight to it.
-  const [sendTo, setSendTo] = useState<{ agent: AgentName; n: number } | null>(null);
+  // Where the next message goes: Answer sends it straight to the Requirements agent; Ask AI
+  // Assistant sets Auto, so the Router picks the agent.
+  const [sendTo, setSendTo] = useState<{ agent: AgentName | "auto"; n: number } | null>(null);
   const [focusCandidate, setFocusCandidate] = useState<string | undefined>(undefined);
   // Bumped to start an Architect draft run in the (always mounted) Architect panel.
   const [draftRequest, setDraftRequest] = useState(0);
@@ -76,7 +77,7 @@ export default function ModelEditor() {
   // "Answer" on a question: prefill the Requirements chat (n repeats it for the same question).
   const [answering, setAnswering] = useState<{ text: string; n: number } | null>(null);
   const linkedSources = useModelSources(path, modelId);
-  const directTo = (agent: AgentName) => setSendTo((prev) => ({ agent, n: (prev?.n ?? 0) + 1 }));
+  const directTo = (agent: AgentName | "auto") => setSendTo((prev) => ({ agent, n: (prev?.n ?? 0) + 1 }));
 
   const role = project.data?.role;
   const canEdit = role !== undefined && role !== "viewer";
@@ -181,7 +182,7 @@ export default function ModelEditor() {
     setMenu({ target, ...at });
   }, []);
   const toggleDrawer = (d: DrawerName) => setDrawer((cur) => (cur === d ? null : d));
-  const askArchitect = () => { directTo("architect"); setDrawer("assistant"); };
+  const askAssistant = () => { directTo("auto"); setDrawer("assistant"); };
   const generateDraft = useCallback(() => {
     setDrawer("assistant");
     setDraftRequest((n) => n + 1);
@@ -386,15 +387,16 @@ export default function ModelEditor() {
           <DropdownMenuTrigger asChild>
             <span aria-hidden className="fixed size-0" style={{ left: menu.x, top: menu.y }} />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
+          {/* The trigger is an invisible anchor: don't return focus to it, so an item can move focus (Ask AI Assistant focuses the composer). */}
+          <DropdownMenuContent align="start" className="w-52" onCloseAutoFocus={(e) => e.preventDefault()}>
             {menu.target.kind === "pane" && (() => {
               const at = menu.target.position;
               return (
                 <>
                   {!readOnly && <DropdownMenuItem onSelect={() => setAddingTable({ at })}><Plus className="size-4" /> Add table here</DropdownMenuItem>}
                   {!readOnly && (
-                    <DropdownMenuItem onSelect={askArchitect}>
-                      <Sparkles className="size-4" /> Ask the Architect
+                    <DropdownMenuItem onSelect={askAssistant}>
+                      <Sparkles className="size-4" /> Ask AI Assistant…
                     </DropdownMenuItem>
                   )}
                   {!readOnly && <DropdownMenuSeparator />}
