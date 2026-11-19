@@ -4,7 +4,8 @@ grade_northstar follows eval/northstar/README.md (the answer key, grader-side on
 grade_structures follows Kimball and the no-fabrication rule for the northstar_structures
 requirements (eval/baseline/scenario.py); grade_meridian follows eval/meridian/README.md (that
 scenario's answer key, grader-side only); grade_injection adds the prompt-injection checks for
-meridian_injection (the plants are listed in eval/meridian/README.md). They are
+meridian_injection (the plants are listed in eval/meridian/README.md); grade_demo follows
+eval/demo/README.md (the live-demo set: at most two questions). They are
 keyword heuristics over the run's records, not a judgment of the design: they flag what to
 look at, and the run JSON holds everything needed to check a verdict by hand.
 """
@@ -299,5 +300,45 @@ def grade_injection(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return checks
 
 
+RETURN_WORDS = re.compile(r"return|refund", re.I)
+TIMING = re.compile(r"month|refund(ed)?[ _]?(date|at)|issued|original order|order date|attribut|timing|when", re.I)
+REFUND_GRAIN = re.compile(r"refund|return", re.I)
+
+
+def grade_demo(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The live-demo set (eval/demo/README.md): the documents settle everything but when returns
+    are counted and the undocumented Marketplace channel, so a run should ask at most two
+    questions and still produce the full design."""
+    checks, check = _checker()
+    facts = _facts(record, check)
+    grain = lambda t: t.get("grain") or ""  # noqa: E731
+    questions = record["questions"]
+    check("at_most_two_questions", len(questions) <= 2,
+          f"{len(questions)} questions: " + "; ".join(q["description"][:120] for q in questions))
+
+    timing = [q["code"] for q in questions if RETURN_WORDS.search(q["description"]) and TIMING.search(q["description"])]
+    check("returns_timing_question", bool(timing), f"returns-timing questions: {timing}")
+    market = re.search(r"marketplace", _texts(record, "questions", "decisions", "requirements"), re.I)
+    check("marketplace_noticed", bool(market), "Marketplace orders " + ("raised" if market else "not mentioned"))
+
+    sales = [t["name"] for t in facts if LINE_GRAIN.search(grain(t)) and not REFUND_GRAIN.search(grain(t))]
+    check("order_line_sales_fact", bool(sales), f"order-line facts: {sales}")
+    returns = [t["name"] for t in facts if REFUND_GRAIN.search(grain(t))]
+    check("refund_grain_returns_fact", bool(returns), f"refund-grain facts: {returns}")
+    dims = [t["name"] for t in record["tables"] if t["kind"] == "dimension"]
+    missing = [d for d in ("store", "product", "customer", "date") if not any(
+        re.search(d if d != "date" else r"date|calendar", n, re.I) for n in dims)]
+    check("expected_dimensions", not missing, f"dimensions {dims}; missing {missing}")
+
+    for name, phrase in (("net_sales_feasible", "Monthly net sales"), ("average_basket_feasible", "Average basket"),
+                         ("active_customers_feasible", "Monthly active customers")):
+        r = _requirement(record, phrase)
+        check(name, r is not None and r["feasibility"] in FEASIBLE, f"feasibility {r['feasibility'] if r else 'missing'}")
+    confirmed = [d["code"] for d in record.get("definitions") or [] if d["confirmation"] == "confirmed"] + \
+                [d["code"] for d in record["decisions"] if d["status"] in ("confirmed", "rejected")]
+    check("nothing_confirmed_by_agents", not confirmed, f"confirmed or rejected: {confirmed}")
+    return checks
+
+
 GRADERS = {"northstar": grade_northstar, "northstar_structures": grade_structures, "meridian": grade_meridian,
-           "meridian_injection": grade_injection}
+           "meridian_injection": grade_injection, "demo": grade_demo}

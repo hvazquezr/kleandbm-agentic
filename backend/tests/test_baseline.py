@@ -258,3 +258,50 @@ def test_meridian_uploads_only_the_notes():
                               documents=[scenario.ROOT / "eval" / "meridian" / "README.md"])
     with pytest.raises(ValueError, match="grader-side only"):
         scenario.set_up(None, leaky, "x")
+
+
+def _demo(**over):
+    r = {
+        "scenario": "demo",
+        "tables": [
+            {"name": "fact_sales", "kind": "fact", "grain": "One row per order line", "attributes": ["net_sales"]},
+            {"name": "fact_returns", "kind": "fact", "grain": "One row per refund", "attributes": ["refund_amount"]},
+            *({"name": n, "kind": "dimension", "grain": None, "attributes": []}
+              for n in ("dim_date", "dim_store", "dim_product", "dim_customer", "dim_channel")),
+        ],
+        "requirements": [
+            {"statement": "Monthly net sales by channel, store and product category", "feasibility": "fully_supported"},
+            {"statement": "Monthly returns by store and product category", "feasibility": "partially_supported"},
+            {"statement": "Average basket by store and month", "feasibility": "fully_supported"},
+            {"statement": "Monthly active customers by store", "feasibility": "fully_supported"},
+        ],
+        "questions": [
+            {"code": "Q-1", "description": "Are returns reported in the month of the original order or the month "
+                                           "the refund was issued? The definitions and the scorecard disagree."},
+            {"code": "Q-2", "description": "39 orders have channel Marketplace, which no report shows. Include them?"},
+        ],
+        "decisions": [], "definitions": [],
+    }
+    r.update(over)
+    return r
+
+
+def test_the_demo_rubric_wants_two_questions_at_most_and_the_full_design():
+    good = grade.grade(_demo())
+    assert all(c["passed"] for c in good.values()), {k: v for k, v in good.items() if not v["passed"]}
+
+    chatty = grade.grade(_demo(questions=[*_demo()["questions"], {"code": "Q-3", "description": "Is tax in net sales?"}]))
+    assert not chatty["at_most_two_questions"]["passed"]
+    quiet = grade.grade(_demo(questions=[]))
+    assert not quiet["returns_timing_question"]["passed"] and not quiet["marketplace_noticed"]["passed"]
+    no_returns = grade.grade(_demo(tables=[t for t in _demo()["tables"] if t["name"] != "fact_returns"]))
+    assert not no_returns["refund_grain_returns_fact"]["passed"]
+    assert not grade.grade(_demo(definitions=[{"code": "D-1", "confirmation": "confirmed"}]))[
+        "nothing_confirmed_by_agents"]["passed"]
+
+
+def test_the_demo_uploads_its_four_documents_and_never_the_answer_key():
+    docs = scenario.DEMO.documents
+    assert [d.suffix for d in docs] == [".xlsx", ".md", ".png", ".png"] and all(d.exists() for d in docs)
+    assert all(d.parent.name == "docs" and d.name not in scenario.FORBIDDEN for d in docs)
+    assert scenario.SCENARIOS["demo"].database == "northstar_demo"

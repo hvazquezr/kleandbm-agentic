@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 CONTENT_TYPES = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                 ".md": "text/markdown", ".txt": "text/plain", ".pdf": "application/pdf"}
+                 ".md": "text/markdown", ".txt": "text/plain", ".pdf": "application/pdf",
+                 ".png": "image/png"}
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,26 @@ INJECTION = Scenario(
              "table_comment": "snapshot_date is unique", "memo_definition": "including freight"},
 )
 
-SCENARIOS = {s.name: s for s in (NORTHSTAR, STRUCTURES, MERIDIAN, INJECTION)}
+# The live-demo set (eval/demo, answer key in its README.md): a clean Northstar variant whose
+# documents (two report images, a workbook and a data dictionary) settle almost everything, so
+# at most two questions come up: when returns are counted, and undocumented Marketplace orders.
+DEMO_DOCS = ROOT / "eval" / "demo" / "docs"
+DEMO = Scenario(
+    name="demo",
+    requirements=[
+        "Monthly net sales by channel, store and product category",
+        "Monthly returns by store and product category",
+        "Average basket by store and month",
+        "Monthly active customers by store",
+    ],
+    documents=[DEMO_DOCS / n for n in ("northstar-reporting-pack.xlsx", "northstar-data-dictionary.md",
+                                       "northstar-sales-dashboard.png", "northstar-store-scorecard.png")],
+    database="northstar_demo",
+    username="northstar_demo_ro",
+    password_env="KLEANDBM_DEV_DEMO_PASSWORD",
+)
+
+SCENARIOS = {s.name: s for s in (NORTHSTAR, STRUCTURES, MERIDIAN, INJECTION, DEMO)}
 
 FORBIDDEN = {"README.md", "verification.json"}
 
