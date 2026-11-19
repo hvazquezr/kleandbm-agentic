@@ -5,6 +5,16 @@ Events:
   data: {"type": "text", "text": "..."}                       (incremental reply text)
   data: {"type": "tool", "status": "started|ok|error", "name": ..., "summary": ..., "record": ...}
   data: {"type": "done", "status": ..., "message_id": ..., "run": {usage...}}
+
+In an Assistant conversation every event after "run" also carries `step` (the agent answering
+that part of the turn, or "router") and `agent` (who produced it; inside an Architect step that
+can be a consultation or a Validator round). The router adds:
+
+  data: {"type": "route", "route": ..., "reason": ..., "source": "router|user", "agents": [...]}
+  data: {"type": "step_done", ...done fields}                 (a chained turn's first agent)
+  data: {"type": "handoff", "from": ..., "to": ..., "note": ...}
+
+and a stopped chain's "done" has `chain_stopped` (the router's note) and `note_message_id`.
 """
 
 import json

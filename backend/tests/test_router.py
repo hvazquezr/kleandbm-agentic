@@ -40,7 +40,7 @@ def test_the_router_sends_a_requirement_to_the_requirements_agent(proj):
     events = send(proj, conv, "We need monthly sales by vendor.")
     [routed] = [e for e in events if e["type"] == "route"]
     assert routed == {"type": "route", "route": "requirements", "reason": "It asks for a requirement.",
-                      "source": "router", "agents": ["business_requirements"]}
+                      "source": "router", "agents": ["business_requirements"], "agent": "router", "step": "router"}
     assert events[-1]["type"] == "done" and events[-1]["status"] == "completed"
     assert len([e for e in events if e["type"] == "done"]) == 1  # the router doesn't send its own
 
@@ -307,3 +307,35 @@ def test_single_agent_conversations_keep_every_reply_in_full(proj):
     send(proj, proj.conv, "Define net sales.")
     send(proj, proj.conv, "And gross sales?")
     assert _turns(model)[1]["text"].startswith("First answer. " * 50)  # not summarized
+
+
+def test_routed_events_are_tagged_with_their_step_and_agent(proj):
+    conv, models = assistant(proj, [route("requirements_then_architect", "Both.")],
+                             requirements_steps=[question(False), {"text": "Recorded Q-001."}])
+    models["architect"].steps.extend(_fix_seq(proj, design_steps(proj)))
+    events = send(proj, conv, "Add a vendor dimension")
+    run_event, *rest = events
+    assert run_event["type"] == "run"
+    assert all("step" in e and "agent" in e for e in rest)
+    route_event = next(e for e in rest if e["type"] == "route")
+    assert route_event["step"] == route_event["agent"] == "router"
+    steps = [e["step"] for e in rest if e["type"] in ("text", "tool", "step_done", "done", "candidate")]
+    # Requirements' events come first, then the Architect's, never interleaved.
+    first_arch = steps.index("architect")
+    assert set(steps[:first_arch]) == {"business_requirements"} and set(steps[first_arch:]) == {"architect"}
+    req_tools = [e for e in rest if e["type"] == "tool" and e["step"] == "business_requirements"]
+    assert req_tools and all(e["agent"] == "business_requirements" for e in req_tools)
+    assert next(e for e in rest if e["type"] == "done")["step"] == "architect"
+
+
+def test_a_consultation_inside_an_architect_step_keeps_its_own_agent(proj):
+    from app.agents.router.agent import tag
+
+    seen = []
+    emit = tag(seen.append, "architect")
+    emit({"type": "tool", "status": "ok", "name": "search_documents", "agent": "business_requirements"})
+    emit({"type": "text", "text": "Designing."})
+    assert seen == [
+        {"type": "tool", "status": "ok", "name": "search_documents", "agent": "business_requirements", "step": "architect"},
+        {"type": "text", "text": "Designing.", "agent": "architect", "step": "architect"},
+    ]

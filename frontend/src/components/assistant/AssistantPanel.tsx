@@ -33,6 +33,12 @@ type ToolActivity = {
   agent?: "business_requirements" | "validator" | "review";
 };
 
+/** The subgraph behind an event, if any: in a routed turn, an event whose agent is its own step's isn't one. */
+function subagent(e: { agent?: string; step?: string }): "business_requirements" | "validator" | undefined {
+  if (!e.agent || e.agent === e.step) return undefined;
+  return e.agent === "business_requirements" || e.agent === "validator" ? e.agent : undefined;
+}
+
 const TOOL_LABELS: Record<string, string> = {
   list_documents: "Listing documents",
   read_document: "Reading a document",
@@ -243,10 +249,11 @@ export function AssistantPanel({
         else if (e.type === "text") setLiveText((t) => t + e.text);
         else if (e.type === "tool") {
           setLiveTools((ts) => {
-            if (e.status === "started") return [...ts, { name: e.name, status: "started", agent: e.agent }];
+            const agent = subagent(e);
+            if (e.status === "started") return [...ts, { name: e.name, status: "started", agent }];
             const copy = [...ts];
-            const i = copy.map((t) => `${t.agent ?? ""}:${t.name}`).lastIndexOf(`${e.agent ?? ""}:${e.name}`);
-            if (i >= 0) copy[i] = { name: e.name, status: e.status, summary: e.summary, record: e.record, agent: e.agent };
+            const i = copy.map((t) => `${t.agent ?? ""}:${t.name}`).lastIndexOf(`${agent ?? ""}:${e.name}`);
+            if (i >= 0) copy[i] = { name: e.name, status: e.status, summary: e.summary, record: e.record, agent };
             return copy;
           });
           if (e.status === "ok" && (e.record || e.name === "put_table")) invalidate();  // show changes as they happen

@@ -4,8 +4,31 @@
  */
 import { ApiError, authHeaders } from "./client";
 
-export type AgentEvent =
+/** An agent that answers a routed turn, or the router itself. */
+export type TurnAgent = "business_requirements" | "architect" | "router";
+
+/**
+ * In an Assistant conversation every event after "run" carries `step` (the agent answering that
+ * part of the turn, or the router) and `agent` (who produced it: inside an Architect step a
+ * consultation or a Validator round has its own). Single-agent conversations leave `step` out.
+ */
+type Tagged = { step?: TurnAgent; agent?: TurnAgent | "validator" };
+
+type DoneEvent = {
+  status: "completed" | "stopped" | "failed";
+  detail: string | null;
+  message_id: string | null;
+  run: { id: string; iterations?: number; tool_calls?: number; input_tokens?: number; output_tokens?: number };
+  candidate?: { id: string; status: string; applied_seq: number | null; ready_for_review: boolean; blockers: number };
+};
+
+export type Route = "requirements" | "architect" | "requirements_then_architect" | "clarify";
+
+export type AgentEvent = (
   | { type: "run"; run_id: string; redacted_credentials?: boolean }
+  | { type: "route"; route: Route; reason: string; source: "router" | "user"; agents: TurnAgent[] }
+  | { type: "handoff"; from: TurnAgent; to: TurnAgent; note: string }
+  | ({ type: "step_done" } & DoneEvent)
   | { type: "text"; text: string }
   | {
       type: "tool";
@@ -14,8 +37,6 @@ export type AgentEvent =
       summary?: string;
       /** action: what happened to the record (added, answered, deferred, resolved, updated). */
       record?: { id: string; code: string; type: string; action?: string } | null;
-      /** Set when a subgraph the Architect called (a consultation or a review) made the call. */
-      agent?: "business_requirements" | "validator";
     }
   | { type: "candidate"; candidate_id: string; status: string }
   | {
@@ -25,19 +46,19 @@ export type AgentEvent =
       counts?: { passed: number; failed: number; unverified: number };
       run_id?: string;
     }
-  | {
+  | ({
       type: "done";
-      status: "completed" | "stopped" | "failed";
-      detail: string | null;
-      message_id: string | null;
-      run: { id: string; iterations?: number; tool_calls?: number; input_tokens?: number; output_tokens?: number };
-      candidate?: { id: string; status: string; applied_seq: number | null; ready_for_review: boolean; blockers: number };
-    };
+      /** Set when a chained turn stopped after its first agent: the router's note, saved as a reply. */
+      chain_stopped?: string;
+      note_message_id?: string;
+    } & DoneEvent)
+) & Tagged;
 
 export async function sendAgentMessage(
   path: { tenant_id: string; project_id: string },
   conversationId: string,
-  body: { text: string; attachment_version_ids: string[] },
+  /** `agent` sends the message straight to one agent of an Assistant conversation, skipping the router. */
+  body: { text: string; attachment_version_ids: string[]; agent?: "business_requirements" | "architect" },
   onEvent: (e: AgentEvent) => void,
 ): Promise<void> {
   const resp = await fetch(

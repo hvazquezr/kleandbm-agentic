@@ -19,6 +19,9 @@ raised a blocking question: the router adds a note saying why, and the Architect
 on a meaning that isn't settled. The Architect gets an application-built handoff note (the record
 codes the first run wrote), never the first agent's reply text. Only the turn's last agent sends
 "done"; the first agent's becomes "step_done", followed by a "handoff" event.
+
+Every event the turn streams carries `step` (the agent answering, or "router") and `agent`
+(who produced it), backlog step 4.
 """
 
 import traceback
@@ -187,6 +190,8 @@ def route_turn(
 ) -> None:
     """Route one user message and run the agent that answers it. `target` (an agent name) skips
     the model call. Never raises: outcomes are recorded on the runs and the conversation."""
+    out = emit  # untagged; the turn's agents tag their own events below
+    emit = tag(out, AGENT_NAME)
     with session_factory() as session:
         run = session.get(AgentRun, run_id)
         conversation = session.get(Conversation, run.conversation_id)
@@ -251,13 +256,14 @@ def route_turn(
                     last = step == len(plan) - 1
                     held: list[dict[str, Any]] = []
 
-                    def step_emit(event: dict[str, Any], *, _held=held, _last=last) -> None:
+                    def step_emit(event: dict[str, Any], *, _held=held, _last=last, _step=agent) -> None:
                         # Only the turn's last agent sends "done"; an earlier one's is held until
                         # the router knows whether the chain goes on.
+                        event = {**event, "agent": event.get("agent") or _step, "step": _step}
                         if event.get("type") == "done" and not _last:
                             _held.append(event)
                         else:
-                            emit(event)
+                            out(event)
 
                     child = AgentRun(tenant_id=run.tenant_id, project_id=run.project_id,
                                      conversation_id=run.conversation_id, agent=agent, parent_run_id=run.id,
@@ -286,10 +292,10 @@ def route_turn(
                             stop = (f"The {AGENT_LABELS[nxt]} isn't available ({exc}), so it didn't work "
                                     f"on the design part of this message.")
                     if stop:
-                        _stop_chain(session, run, conversation, emit, held, stop)
+                        _stop_chain(session, run, conversation, out, held, stop)
                         break
                     for event in held:  # the first agent's outcome, not the turn's end
-                        emit({**event, "type": "step_done", "agent": agent})
+                        out({**event, "type": "step_done"})
                     note = handoff_note(session, child)
                     emit({"type": "handoff", "from": agent, "to": nxt, "note": note})
             finally:
@@ -298,6 +304,13 @@ def route_turn(
                 if router_run.status is RunStatus.RUNNING:
                     _close(session, router_run, RunStatus.FAILED if failed_detail else RunStatus.COMPLETED,
                            failed_detail)
+
+
+def tag(emit: Emit, step: str) -> Emit:
+    """Events of one step of the turn: `step` is the agent answering (or the router), and `agent`
+    is who produced the event, which differs inside a step for the Architect's consultations and
+    Validator rounds."""
+    return lambda event: emit({**event, "agent": event.get("agent") or step, "step": step})
 
 
 def _new_blocking_questions(session: Session, scope, run: AgentRun) -> list[modeling.RecordView]:
@@ -361,5 +374,6 @@ def _stop_chain(session: Session, run: AgentRun, conversation: Conversation, emi
                                text=text, attachments=[], activity=[], run_id=run.id, author_id=run.id)
     session.add(note)
     session.commit()
-    for event in held or [{"type": "done", "status": str(RunStatus.COMPLETED), "detail": None}]:
+    for event in held or [{"type": "done", "status": str(RunStatus.COMPLETED), "detail": None,
+                           "agent": AGENT_NAME, "step": AGENT_NAME}]:
         emit({**event, "chain_stopped": text, "note_message_id": str(note.id)})
