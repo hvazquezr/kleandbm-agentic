@@ -38,7 +38,7 @@ ROUTES: list[tuple[str, str, dict | None]] = [
     ("GET", "/models/{model}/versions", None),
     ("POST", "/models/{model}/versions", {"name": "probe"}),
     ("GET", "/models/{model}/state", None),
-    ("POST", "/models/{model}/state", {"state": "ready_for_review"}),
+    ("POST", "/models/{model}/state", {"state": "ready_for_review", "note": "probe"}),
     ("GET", "/models/{model}/state/history", None),
     ("GET", "/models/{model}/definition-dependencies", None),
     ("POST", "/models/{model}/table-suggestions", {"description": "a vendor dimension"}),

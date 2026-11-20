@@ -278,7 +278,9 @@ function FinishStep({ path, modelId, onBack }: { path: ProjectPath; modelId: str
         {open.length > 0 && (
           <p>
             {open.length} question{open.length === 1 ? " is" : "s are"} still open{blocking ? ` (${blocking} blocking)` : ""}. The
-            Architect designs around them and lists them as blockers; you can also go back and answer them first.
+            Architect designs around {open.length === 1 ? "it" : "them"}
+            {blocking ? `, and ${blocking === 1 ? "the blocking one stays a blocker" : "blocking ones stay blockers"}` : ""}; you
+            can also go back and answer {open.length === 1 ? "it" : "them"} first.
           </p>
         )}
         {sources === 0 && (

@@ -250,7 +250,10 @@ def test_acceptance_needs_approval_and_lapses_on_change(proj, as_user, client, m
     surl = f"{proj.base}/models/{proj.model}/state"
 
     assert proj.alice.get(surl).json()["effective_state"] == "draft"
-    assert carol.post(surl, json={"state": "ready_for_review"}).status_code == 200
+    # Set by hand, Ready for Review skips the design checks, so it needs a note saying why.
+    silent = carol.post(surl, json={"state": "ready_for_review", "note": "  "})
+    assert silent.status_code == 409 and "note" in silent.json()["detail"]
+    assert carol.post(surl, json={"state": "ready_for_review", "note": "Reviewed the star schema"}).status_code == 200
     denied = carol.post(surl, json={"state": "accepted"})
     assert denied.status_code == 403 and denied.json()["required_permission"] == "project:approve"
 
@@ -372,7 +375,7 @@ def test_acceptance_needs_dependent_definitions_confirmed_or_excepted(proj):
     assert by_term["Net sales"]["reasons"][0].startswith("conflicts with")
     assert by_term["Customer"]["reasons"] == ["used by dim_customer"]
 
-    assert proj.alice.post(surl, json={"state": "ready_for_review"}).status_code == 200
+    assert proj.alice.post(surl, json={"state": "ready_for_review", "note": "ok"}).status_code == 200
     refused = proj.alice.post(surl, json={"state": "accepted"})
     assert refused.status_code == 409
     assert "Sales" in refused.json()["detail"] and "Net sales" in refused.json()["detail"]
@@ -386,7 +389,7 @@ def test_acceptance_needs_dependent_definitions_confirmed_or_excepted(proj):
     silent = proj.alice.post(surl, json={"state": "accepted", "exceptions": [regs["sales"], regs["net"]]})
     assert silent.status_code == 409 and "note" in silent.json()["detail"]
     # Exceptions only mean something when accepting.
-    assert proj.alice.post(surl, json={"state": "ready_for_review", "exceptions": [regs["sales"]]}).status_code == 409
+    assert proj.alice.post(surl, json={"state": "ready_for_review", "note": "ok", "exceptions": [regs["sales"]]}).status_code == 409
     assert proj.alice.get(surl).json()["effective_state"] == "ready_for_review"
 
     accepted = proj.alice.post(surl, json={"state": "accepted", "note": "Finance confirms gross next sprint",

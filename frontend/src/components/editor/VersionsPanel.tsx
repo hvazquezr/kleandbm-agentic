@@ -61,6 +61,18 @@ export function VersionsPanel({
       });
       if (entered === null) return;
       note = entered.trim() || undefined;
+    } else if (next === "ready_for_review") {
+      // Set by hand, it skips the design's readiness checks (Validator review, blockers), so
+      // the reviewer sees in the history why it was marked ready. The API requires it too.
+      const entered = await ask({
+        title: `Mark the model Ready for Review at seq ${snapshot.current_seq}?`,
+        description: "Marking it by hand doesn't run the design checks or the Validator. Say why it's ready; the note is kept in the lifecycle history.",
+        inputLabel: "Why it's ready for review (required)",
+        inputRequired: true,
+        confirmLabel: "Mark ready",
+      });
+      if (entered === null) return;
+      note = entered.trim();
     }
     try {
       await setState.mutateAsync({ state: next, note, exceptions: next === "accepted" ? exceptions : undefined });

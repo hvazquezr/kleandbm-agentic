@@ -1020,16 +1020,20 @@ def set_state(
     model depends on must be confirmed by a person or named in ``exceptions`` (accepted as an
     assumption, with a note saying why). A rejected definition the model still uses can't be
     excepted. Ready for Review doesn't need confirmed definitions; unconfirmed meanings stay
-    listed for the reviewer (spec §7).
+    listed for the reviewer (spec §7), but it needs a note: set by hand it skips the design's
+    readiness checks, so whoever sets it says why (the automatic paths in design.py write one).
     """
     get_model(session, scope, model_id)
     exceptions = list(dict.fromkeys(exceptions))
+    note = (note or "").strip() or None
     if state is ModelState.ACCEPTED:
         scope.require(Permission.PROJECT_APPROVE)
     else:
         scope.require(Permission.PROJECT_EDIT)
         if exceptions:
             raise InvalidOperation("definition exceptions apply only when accepting a model")
+    if state is ModelState.READY_FOR_REVIEW and note is None:
+        raise InvalidOperation("say why the model is ready for review: a note is required")
     seq = current_seq(session, scope) or None
     if state is not ModelState.DRAFT and seq is None:
         raise InvalidOperation(f"an empty model cannot be {state}")
