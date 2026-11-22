@@ -845,6 +845,12 @@ class _ChangesetWriter:
         )
         if link is None:
             raise InvalidOperation(f"no live link {op.link_id}")
+        if self.scope.actor.kind is ActorKind.AGENT:
+            # A person-confirmed meaning includes the definitions it uses: an agent can't take
+            # one away any more than it can edit the entry (_guard_agent_authority).
+            source, data, _, _ = self._current(link.from_id)
+            if source.record_type in self._APPROVAL_TYPES and str(data.get("confirmation_status")) == "confirmed":
+                raise InvalidOperation("this entry was confirmed by a person; raise a question instead of changing its links")
         link.removed_seq = self.seq
 
 

@@ -345,3 +345,37 @@ def test_answers_are_shown_as_answered_and_counted_by_status(proj):
 def modeling_seq(proj) -> int:
     snap = proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()
     return next(q["seq"] for q in snap["questions"] if q["code"] == "Q-001")
+
+
+def test_agent_moves_a_requirement_off_a_rejected_definition(proj, db_session_factory):
+    """After a person rejects a definition, the agent can drop it from the requirements that use it
+    (unlink_records); it can't change the links of an entry a person confirmed."""
+    regs = proj.alice.post(f"{proj.base}/changesets", json={"operations": [
+        {"op": "create", "type": "requirement", "ref": "r", "data": {"statement": "Monthly returns", "origin_kind": "document"}},
+        {"op": "create", "type": "requirement", "ref": "c", "data": {"statement": "Monthly sales", "origin_kind": "document",
+                                                                      "confirmation_status": "confirmed"}},
+        {"op": "create", "type": "definition", "ref": "old", "data": {"term": "Returns", "provenance": "documented",
+                                                                       "confirmation_status": "rejected"}},
+        {"op": "create", "type": "definition", "ref": "new", "data": {"term": "Returns (refund month)", "provenance": "user_stated"}},
+        {"op": "link", "from_id": "$r", "to_id": "$old", "link_type": "uses_definition"},
+        {"op": "link", "from_id": "$r", "to_id": "$new", "link_type": "uses_definition"},
+        {"op": "link", "from_id": "$c", "to_id": "$old", "link_type": "uses_definition"},
+    ]}).json()["created"]
+    proj.script(
+        {"tool_calls": [{"name": "unlink_records", "input": {
+            "from_id": regs["r"], "to_id": regs["old"], "link_type": "uses_definition"}}]},
+        {"tool_calls": [{"name": "unlink_records", "input": {   # already gone
+            "from_id": regs["r"], "to_id": regs["old"], "link_type": "uses_definition"}}]},
+        {"tool_calls": [{"name": "unlink_records", "input": {   # a person confirmed this requirement
+            "from_id": regs["c"], "to_id": regs["old"], "link_type": "uses_definition"}}]},
+        {"text": "REQ-001 now uses only the refund-month definition. REQ-002 is confirmed, so I raised nothing."},
+    )
+    events = sse(proj.send(proj.alice, "DEF-001 is rejected; use DEF-002 for returns."))
+    tools = [(e["name"], e["status"]) for e in events if e["type"] == "tool" and e["status"] != "started"]
+    assert tools == [("unlink_records", "ok"), ("unlink_records", "error"), ("unlink_records", "error")]
+    errors = [e["summary"] for e in events if e["type"] == "tool" and e["status"] == "error"]
+    assert "no uses_definition link" in errors[0] and "confirmed by a person" in errors[1]
+
+    uses = {(l["from_id"], l["to_id"]) for l in proj.alice.get(f"{proj.base}/models/{proj.model}/snapshot").json()["links"]
+            if l["link_type"] == "uses_definition"}
+    assert uses == {(regs["r"], regs["new"]), (regs["c"], regs["old"])}

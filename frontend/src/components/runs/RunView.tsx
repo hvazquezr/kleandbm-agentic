@@ -21,7 +21,7 @@ export type RunFocus = { runId: string; agent?: string; ordinal?: number; /** op
 
 const WRITE_TOOLS = new Set([
   "put_table", "put_relationships", "remove_element", "map_requirement", "record_decision", "update_feasibility",
-  "raise_question", "record_requirement", "record_definition", "update_entry", "link_records", "record_finding",
+  "raise_question", "record_requirement", "record_definition", "update_entry", "link_records", "unlink_records", "record_finding",
   "submit_review", "answer_architect", "flag_untrusted_content", "open_decision_point", "ask_requirements",
 ]);
 

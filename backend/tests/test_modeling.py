@@ -414,6 +414,11 @@ def test_acceptance_needs_dependent_definitions_confirmed_or_excepted(proj):
                                  "data": {"confirmation_status": "rejected"}}], model_id=None).status_code == 201
     used_rejected = proj.alice.post(surl, json={"state": "accepted", "note": "x", "exceptions": [regs["sales"]]})
     assert used_rejected.status_code == 409 and "rejected definitions" in used_rejected.json()["detail"]
+    # The way out: the requirement stops using it (the Registers' remove control sends this unlink).
+    uses = next(l for l in proj.snap()["links"] if l["from_id"] == regs["r"] and l["to_id"] == regs["sales"])
+    assert proj.cs(proj.alice, [{"op": "unlink", "link_id": uses["id"]}], model_id=None).status_code == 201
+    assert "Sales" not in {d["term"] for d in proj.alice.get(f"{proj.base}/models/{proj.model}/definition-dependencies").json()}
+    assert proj.alice.post(surl, json={"state": "accepted"}).status_code == 200
 
 
 # --- Scope and permissions ------------------------------------------------------------------

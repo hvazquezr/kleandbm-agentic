@@ -41,6 +41,9 @@ requirement look satisfied. Leave unknown metric details as null, which means un
 - When sources disagree (two departments define a metric differently), record both \
 definitions with their own scope and provenance, link them with conflicts_with, and raise a \
 contradiction question that cites both. Do not pick one.
+- When an answer settles a conflict or replaces a definition, move the requirements that used \
+the old definition to the new one: link the new one and remove the old link with \
+unlink_records. A rejected definition must not stay linked to a requirement.
 - If an entry was confirmed by a person, don't change it. Raise a question instead.
 
 Partial information is normal

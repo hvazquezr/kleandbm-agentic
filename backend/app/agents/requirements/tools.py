@@ -20,7 +20,7 @@ from app.adapters.storage import ObjectStore
 from app.adapters.vision import VisionError, prepare_image
 from app.domain import documents, modeling
 from app.domain.access import NotFoundInScope, ProjectScope
-from app.domain.modeling import CreateOp, LinkOp, StaleUpdate, UpdateOp
+from app.domain.modeling import CreateOp, LinkOp, StaleUpdate, UnlinkOp, UpdateOp
 from app.domain.records import (
     DefinitionKind,
     DefinitionProvenance,
@@ -158,6 +158,17 @@ TOOL_SPECS = [
         "Link two register records. uses_definition: requirement -> definition; conflicts_with: "
         "definition <-> definition or requirement <-> requirement; alternative_for: proposed -> original "
         "requirement; concerns: question -> any record.",
+        _obj({
+            "from_id": {"type": "string"},
+            "to_id": {"type": "string"},
+            "link_type": {"type": "string", "enum": ["uses_definition", "conflicts_with", "alternative_for", "concerns"]},
+        }),
+    ),
+    ToolSpec(
+        "unlink_records",
+        "Remove a link between two register records, e.g. a definition a requirement no longer uses after "
+        "the user changed or rejected it. Same ids and link types as link_records; conflicts_with matches "
+        "either direction. Entries a person confirmed can't be changed; raise a question instead.",
         _obj({
             "from_id": {"type": "string"},
             "to_id": {"type": "string"},
@@ -459,6 +470,18 @@ def link_records(ctx: ToolContext, args: dict) -> dict:
     return {"summary": f"Linked records ({args['link_type']})"}
 
 
+def unlink_records(ctx: ToolContext, args: dict) -> dict:
+    from_id, to_id = _uuid(args["from_id"]), _uuid(args["to_id"])
+    link_type = LinkType(args["link_type"])
+    pairs = {(from_id, to_id)} | ({(to_id, from_id)} if link_type is LinkType.CONFLICTS_WITH else set())
+    links = [l for l in modeling.list_live_links(ctx.session, ctx.scope)
+             if l.link_type == link_type and (l.from_id, l.to_id) in pairs]
+    if not links:
+        raise ToolInputError(f"there's no {link_type.value} link between those records; check get_registers")
+    _write(ctx, [UnlinkOp(link_id=l.id) for l in links])
+    return {"summary": f"Removed link ({link_type.value})"}
+
+
 def flag_untrusted_content(ctx: ToolContext, args: dict) -> dict:
     """Record a durable flag on content that tried to instruct an agent (domain/flags.py)."""
     from app.domain import flags
@@ -510,7 +533,8 @@ HANDLERS: dict[str, Callable[[ToolContext, dict], dict]] = {
     "update_entry": update_entry,
     "raise_question": raise_question,
     "link_records": link_records,
+    "unlink_records": unlink_records,
     "flag_untrusted_content": flag_untrusted_content,
 }
 WRITE_TOOLS = {"record_requirement", "record_definition", "update_entry", "raise_question", "link_records",
-               "flag_untrusted_content"}
+               "unlink_records", "flag_untrusted_content"}

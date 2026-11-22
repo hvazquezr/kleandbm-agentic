@@ -87,6 +87,14 @@ function Decide({ id, seq, code, write, field = "confirmation_status" }: {
   );
 }
 
+/** Register entries in code order (REQ-001, REQ-002, … REQ-010, numbers compared as numbers);
+ *  entries without a code go last. */
+function byCode<T extends { code: string | null }>(items: T[]): T[] {
+  return [...items].sort((a, b) =>
+    a.code === null ? (b.code === null ? 0 : 1) : b.code === null ? -1
+      : a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+
 export type RegisterKey = "requirements" | "definitions" | "questions" | "decisions" | "checks";
 
 export function RegistersPanel({
@@ -122,7 +130,7 @@ export function RegistersPanel({
     <div className="space-y-6">
       {show("requirements") && (
       <Section title="Requirements" count={snapshot.requirements.length}>
-        {snapshot.requirements.map((r) => (
+        {byCode(snapshot.requirements).map((r) => (
           <Item key={r.id} code={r.code} onClick={() => onSelectRecord(r.id)} actions={decide(r)}>
             <div>{r.data.statement}</div>
             <div className="flex flex-wrap gap-1.5">
@@ -134,6 +142,8 @@ export function RegistersPanel({
               Origin: {humanize(r.data.origin_kind)}{r.data.origin_ref ? ` — ${r.data.origin_ref}` : ""}
             </div>
             {r.data.feasibility_notes && <div className="text-xs text-muted-foreground">Feasibility: {r.data.feasibility_notes}</div>}
+            <UsesDefinitions requirement={r} snapshot={snapshot} onSelect={onSelectRecord}
+              write={canEdit ? write : undefined} />
             <Traced label="Mapped to" ids={trace.mappedTo(r.id)} trace={trace} onSelect={onSelectRecord}
               empty={r.data.feasibility_status === "unsupported" ? undefined : "Not mapped to the model yet"} />
             {trace.checksFor([r.id]).map((c) => <CheckLine key={c.id} check={c} onSelect={onSelectRecord} />)}
@@ -144,7 +154,7 @@ export function RegistersPanel({
 
       {show("definitions") && (
       <Section title="Business definitions" count={snapshot.definitions.length}>
-        {snapshot.definitions.map((d) => (
+        {byCode(snapshot.definitions).map((d) => (
           <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)} actions={decide(d)}>
             <div className="font-medium">{d.data.term} <span className="text-xs text-muted-foreground">({humanize(d.data.kind)})</span></div>
             {d.data.definition ? <div className="text-muted-foreground">{d.data.definition}</div>
@@ -161,7 +171,7 @@ export function RegistersPanel({
 
       {show("questions") && (
       <Section title="Questions & conflicts" count={snapshot.questions.length}>
-        {snapshot.questions.map((q) => (
+        {byCode(snapshot.questions).map((q) => (
           <Item key={q.id} code={q.code} onClick={() => onSelectRecord(q.id)}
             actions={q.data.kind !== "decision_point" && q.data.status === "open" && canEdit && onAnswer ? (
               <Button size="sm" variant="outline" className="h-7" onClick={() => onAnswer({ id: q.id, code: q.code })}>
@@ -188,7 +198,7 @@ export function RegistersPanel({
 
       {show("decisions") && (
       <Section title="Decisions & assumptions" count={snapshot.decisions.length}>
-        {snapshot.decisions.map((d) => (
+        {byCode(snapshot.decisions).map((d) => (
           <Item key={d.id} code={d.code} onClick={() => onSelectRecord(d.id)}
             actions={canEdit && write && d.data.status === "proposed"
               ? <Decide id={d.id} seq={d.seq} code={d.code} write={write} field="status" /> : undefined}>
@@ -205,7 +215,7 @@ export function RegistersPanel({
 
       {show("checks") && (
       <Section title="Validation checks" count={snapshot.checks.length}>
-        {snapshot.checks.map((c) => (
+        {byCode(snapshot.checks).map((c) => (
           <Item key={c.id} code={c.code} onClick={() => onSelectRecord(c.id)}>
             <div>{c.data.summary}</div>
             <div className="flex flex-wrap gap-1.5">
@@ -234,6 +244,50 @@ function Traced({ label, ids, trace, onSelect, empty }: {
     <div className="flex flex-wrap items-center gap-1 text-xs">
       <span className="text-muted-foreground">{label}</span>
       {ids.map((id) => <RefChip key={id} id={id} trace={trace} onSelect={onSelect} />)}
+    </div>
+  );
+}
+
+/** The definitions a requirement uses, each removable by an editor: a rejected or replaced
+ *  definition shouldn't stay linked, or the model keeps depending on it (acceptance refuses a
+ *  rejected one in use). Removing sends an unlink changeset as the person. */
+function UsesDefinitions({ requirement, snapshot, onSelect, write }: {
+  requirement: { id: string; code: string | null };
+  snapshot: Snapshot;
+  onSelect: (id: string) => void;
+  write?: Write;
+}) {
+  const defs = new Map(snapshot.definitions.map((d) => [d.id, d]));
+  const used = snapshot.links
+    .filter((l) => l.link_type === "uses_definition" && l.from_id === requirement.id && defs.has(l.to_id))
+    .map((l) => ({ link: l, def: defs.get(l.to_id)! }));
+  if (used.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs">
+      <span className="text-muted-foreground">Uses</span>
+      {used.map(({ link, def }) => {
+        const rejected = def.data.confirmation_status === "rejected";
+        return (
+          <span key={link.id} className={cn("inline-flex items-center gap-0.5 rounded border pl-1.5 pr-0.5 py-0.5",
+            rejected ? "border-red-500/40 text-red-400" : "text-foreground")}>
+            <button type="button" className="hover:underline" title={rejected ? "Rejected definition" : def.data.definition ?? undefined}
+              onClick={(e) => { e.stopPropagation(); onSelect(def.id); }}>
+              <span className="font-mono">{def.code}</span> {def.data.term}{rejected ? " (rejected)" : ""}
+            </button>
+            {write && (
+              <button type="button" aria-label={`Stop using ${def.code}`} title={`${requirement.code} no longer uses ${def.code}`}
+                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void write([{ op: "unlink", link_id: link.id }],
+                    { success: `${requirement.code} no longer uses ${def.code}`, reason: `Removed ${def.code} from ${requirement.code}` });
+                }}>
+                <X className="size-3" />
+              </button>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

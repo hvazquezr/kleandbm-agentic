@@ -50,6 +50,7 @@ const TOOL_LABELS: Record<string, string> = {
   update_entry: "Updating an entry",
   raise_question: "Raising a question",
   link_records: "Linking records",
+  unlink_records: "Removing a link",
   view_image: "Looking at an image",
   list_sources: "Listing data sources",
   source_list_tables: "Listing source tables",
@@ -96,6 +97,8 @@ const AUTHORS: Record<TurnAgent, { name: string; icon: typeof Bot; tone: string 
   architect: { name: "Architect", icon: DraftingCompass, tone: "text-emerald-400" },
   router: { name: "Assistant", icon: Route, tone: "text-muted-foreground" },
 };
+/** How "Auto" (the Router picks the agent) looks when it's the selected target. */
+const AUTO_TARGET = { icon: Route, tone: "text-sky-400" };
 
 const ROUTE_TEXT: Record<string, string> = {
   requirements: "Sent to the Requirements agent",
@@ -482,20 +485,35 @@ export function AssistantPanel({
           <div className="flex items-center gap-2">
             <input ref={fileInput} type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.png,.jpg,.jpeg"
               onChange={(e) => attach(e.target.files)} />
+            {/* With the To switch beside it, Attach is icon-only so a chosen agent's chip fits. */}
             <Button size="sm" variant="outline" disabled={running || uploading} onClick={() => fileInput.current?.click()}
-              title="Personal data in the extracted text is masked before agents see it. Images are read by a vision model, which receives the image itself.">
-              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />} Attach
+              aria-label="Attach documents"
+              title="Attach documents. Personal data in the extracted text is masked before agents see it. Images are read by a vision model, which receives the image itself.">
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+              {!(routed && !lockTarget) && " Attach"}
             </Button>
             {routed && !lockTarget ? (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground" role="radiogroup" aria-label="Send to">
+              <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs text-muted-foreground" role="radiogroup" aria-label="Send to">
                 <span>To</span>
-                <div className="flex rounded-md border p-0.5">
-                  {([["auto", "Auto"], ["business_requirements", "Requirements"], ["architect", "Architect"]] as const).map(([value, label]) => (
-                    <button key={value} type="button" role="radio" aria-checked={sendTo === value} disabled={running}
-                      title={value === "auto" ? "The assistant picks the agent" : `Send the next message to the ${AUTHORS[value].name}`}
-                      className={cn("px-1.5 py-0.5 rounded", sendTo === value ? "bg-accent text-foreground" : "hover:text-foreground")}
-                      onClick={() => setSendTo(value)}>{label}</button>
-                  ))}
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                  {([["auto", "Auto"], ["business_requirements", "Requirements"], ["architect", "Architect"]] as const).map(([value, label]) => {
+                    const selected = sendTo === value;
+                    // The selected option is a chip in its own colour and icon, so a pinned
+                    // agent (e.g. from Answer) is hard to miss and Auto reads as a choice too.
+                    const look = value === "auto" ? AUTO_TARGET : AUTHORS[value];
+                    const Icon = look.icon;
+                    return (
+                      <button key={value} type="button" role="radio" aria-checked={selected} disabled={running}
+                        title={value === "auto" ? "The assistant picks the agent" : `Send the next message to the ${AUTHORS[value].name}`}
+                        className={cn("flex shrink-0 items-center gap-1 px-1.5 py-0.5",
+                          selected ? "rounded-full border border-current bg-accent font-medium" : "rounded hover:text-foreground",
+                          selected && look.tone)}
+                        onClick={() => setSendTo(value)}>
+                        {selected && <Icon className="size-3.5" />}
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
