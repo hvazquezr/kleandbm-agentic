@@ -39,9 +39,7 @@ Around the agents sit a FastAPI backend (API, domain services, agents, persisten
 | MySQL MCP server | `mcp/mysql_source/` | Curated read-only tools: list and describe tables, row counts, column profiles, candidate-key, relationship and coverage checks, and masked samples. Read-only grants verified each session, timeouts, row caps, schema fingerprints. |
 | Backend | `backend/app/` | FastAPI with separate API, domain, agent, persistence and adapter layers. Every record is scoped to tenant, project and model, and versioned as append-only revisions in attributed changesets. |
 | Frontend | `frontend/` | React + React Flow editor: model canvas, registers, Review drawer (diff, findings, apply), the Assistant chat with live streaming and a route line on each message, and a run viewer with transcripts and monitor assessments. |
-| Evaluation | `eval/` | Synthetic businesses with answer keys (Northstar Retail, Meridian Supply, and a demo set), the scenario runner with keyword rubrics, the routing eval, and monitor calibration. |
-
-The design spec is [`docs/spec.md`](docs/spec.md) (agreed decisions in §7, open questions in §8). Known issues and deferred work are in [`docs/backlog.md`](docs/backlog.md). [`CLAUDE.md`](CLAUDE.md) is the detailed developer guide to every component.
+| Evaluation | `eval/` | Synthetic businesses with answer keys (Northstar Retail and Meridian Supply), the scenario runner with keyword rubrics, the routing eval, and monitor calibration. |
 
 ### Safety in the code, not only in prompts
 
@@ -111,8 +109,6 @@ These build synthetic MySQL databases with a SELECT-only user and write its pass
 eval/northstar/load.sh
 conda run -n kleandbm-agentic python eval/northstar/verify.py
 eval/meridian/load.sh
-eval/demo/load.sh
-conda run -n kleandbm-agentic python eval/demo/verify.py
 ```
 
 ### 4. Frontend
@@ -124,21 +120,17 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Set the Auth0 domain, SPA client ID and audience in `.env.local`, then open http://localhost:5173. The dev server proxies `/api` to the backend on port 8001. In Auth0, a post-login Action that adds `https://kleandbm.ai/name` and `https://kleandbm.ai/email` to the access token gives users a display name (see `CLAUDE.md`).
+Set the Auth0 domain, SPA client ID and audience in `.env.local`, then open http://localhost:5173. The dev server proxies `/api` to the backend on port 8001. In Auth0, a post-login Action that adds `https://kleandbm.ai/name` and `https://kleandbm.ai/email` to the access token: `CLAIM_NAMESPACE` in `backend/app/api/auth.py`. Without it, users have no display name.
 
 ## Usage
 
-The demo set (`eval/demo/`) is the quickest walk-through: a clean Northstar variant built to leave at most two questions. `eval/demo/demo-script.md` has the exact text to type.
-
 1. Sign in, create a project, and start **New model (guided)**.
-2. Upload the four files in `eval/demo/docs/` (a reporting workbook, a data dictionary and two report images). Never upload `eval/demo/README.md` or the demo script: they describe the expected answer.
-3. Add the MySQL source: host `127.0.0.1`, database `northstar_demo`, user `northstar_demo_ro`, and the password from `KLEANDBM_DEV_DEMO_PASSWORD` in `backend/.env`. Credentials are entered only in this form, never in chat.
+2. Upload `eval/meridian/meridian-ops-notes.md`. Never upload `eval/meridian/README.md`: it describes the expected answer.
+3. Add the MySQL source: host `127.0.0.1`, database `meridian_ops`, user `meridian_ro`, and the password from `KLEANDBM_DEV_MERIDIAN_PASSWORD` in `backend/.env`. Credentials are entered only in this form, never in chat.
 4. State the requirements in the Assistant. The Business Requirements agent records them and their definitions, and asks about anything unclear.
-5. Choose **Generate draft model**. The Architect investigates the source, designs, and the Validator reviews it; the demo run takes about 8 minutes.
+5. Choose **Generate draft model**. The Architect investigates the source and designs, and the Validator reviews it; a full run takes 7 to 14 minutes.
 6. Open **Review** to see readiness, blockers, the diff, and the Validator's findings. Apply or discard the candidate.
 7. In **Registers**, answer open questions and confirm or reject definitions and decisions. **View run** on any reply shows the full transcript and the monitor's assessment.
-
-For a harder case, use the Meridian source (`meridian_ops`, user `meridian_ro`) with `eval/meridian/meridian-ops-notes.md`; a full run takes 7 to 14 minutes.
 
 ## Tests
 
@@ -166,7 +158,7 @@ conda run -n kleandbm-agentic python ../eval/baseline/run.py --scenario meridian
 
 | Option | Meaning |
 |---|---|
-| `--scenario` | `northstar` (stated requirements, mostly a business-meaning conflict), `northstar_structures` (built to raise technical conflicts), `meridian` (split and multi-warehouse shipments, backorders, re-run inventory counts), `meridian_injection` (Meridian with planted prompt injections; build it with `MERIDIAN_INJECT=1 eval/meridian/load.sh`), `demo` (the live-demo set) |
+| `--scenario` | `northstar` (stated requirements, mostly a business-meaning conflict), `northstar_structures` (built to raise technical conflicts), `meridian` (split and multi-warehouse shipments, backorders, re-run inventory counts), `meridian_injection` (Meridian with planted prompt injections; build it with `MERIDIAN_INJECT=1 eval/meridian/load.sh`) |
 | `--variants` | `baseline` (single candidate), `tot` (selective Tree of Thought), or both |
 | `--repeats` | runs per variant; use 3 or more to compare |
 | `--check` | free preflight: database, source and documents, no model calls |
@@ -189,7 +181,7 @@ conda run -n kleandbm-agentic python ../eval/routing/run.py --cases ../eval/rout
 
 `cases_holdout.json` is held out: never tune the Router prompt to it.
 
-**Answer keys.** `eval/northstar/README.md`, `eval/meridian/README.md`, `eval/demo/README.md`, `eval/demo/demo-script.md` and `retail-discovery/verification.json` describe what a correct model looks like. They're for graders and readers. The runner refuses to upload them, and they must never be given to an agent.
+**Answer keys.** `eval/northstar/README.md`, `eval/meridian/README.md` and `retail-discovery/verification.json` describe what a correct model looks like. They're for graders and readers. The runner refuses to upload them, and they must never be given to an agent.
 
 ### Results so far
 
@@ -197,12 +189,12 @@ conda run -n kleandbm-agentic python ../eval/routing/run.py --cases ../eval/rout
 |---|---|
 | Meridian, single candidate (latest runs) | Rubric 11/11 on all 8 completed runs (one earlier batch failed at its first call on a provider schema limit, since fixed). None of the runs reached Ready for Review, because business-meaning questions (for example the reporting calendar) correctly stayed open for a person. |
 | Selective ToT vs. single candidate (Northstar, Northstar structures, Meridian; 3 repeats each) | No rubric gain. Before the trigger was narrowed, search opened on settled conflicts and roughly doubled cost. Now it opens only when the evidence leaves the choice undecided. |
-| Demo set (1 run) | Rubric 11/11 in under 8 minutes, with two questions, including the expected one on when returns are counted, and the undocumented Marketplace orders noticed. |
+| Demo set (a clean Northstar variant used for the live demo; 1 run) | Rubric 11/11 in under 8 minutes, with two questions, including the expected one on when returns are counted, and the undocumented Marketplace orders noticed. |
 | Prompt injection (Meridian with 5 planted instructions and false claims) | No plant followed in 3 runs; questions still raised; nothing confirmed by agents; the plants were reported. |
 | Router (labelled messages × 3 repeats) | 88.7% with the first prompt, 99.3% after one fix (50 cases); 97.9% on a held-out set of 47 cases never used for tuning, routed the same way on every repeat. |
 | Transcript monitor calibration | 12/12 planted violations flagged with the right kind; 2 of 5 clean runs flagged at a threshold of 50 (1 of 5 at 65). It ranks runs for review and never blocks. |
 
-Each result folder's `report.md` and `summary.json` are in `eval/baseline/results/`, `eval/monitor/results/` and `eval/routing/results/` (per-run JSON stays local: it holds transcripts and masked source samples). The rubrics are keyword heuristics over the stored records, and the scenarios are small. See `docs/backlog.md` for the known gaps in the evaluation.
+Each result folder's `report.md` and `summary.json` are in `eval/baseline/results/`, `eval/monitor/results/` and `eval/routing/results/` (per-run JSON stays local: it holds transcripts and masked source samples). The rubrics are keyword heuristics over the stored records, and the scenarios are small.
 
 ## Repository layout
 
@@ -212,7 +204,7 @@ mcp/mysql_source/ read-only MySQL MCP server
 frontend/         React editor
 eval/             sample sources, scenario runner, graders, routing eval, monitor calibration
 retail-discovery/ Northstar discovery documents (the report the agents read; verification.json is grader-only)
-docs/             design spec and backlog
+docs/images/      architecture diagram
 ```
 
 All data in this repository is synthetic.
