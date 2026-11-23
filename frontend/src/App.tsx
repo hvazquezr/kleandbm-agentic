@@ -72,7 +72,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen">
       <header className="border-b px-6 py-3 flex items-center gap-3">
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <img src="/kleandbm-logo.svg" alt="KleanDBM" className="h-6" />
+          <img src="/kleandbm-logo.svg" alt="kleandbm.ai" className="h-6" />
         </Link>
         <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
           {user?.name ?? user?.email}
