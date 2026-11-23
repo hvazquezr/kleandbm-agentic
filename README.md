@@ -25,32 +25,9 @@ The user talks to one **Assistant** per data model. Behind it, a Router reads ea
 
 ## Architecture
 
-```
-                   React editor (canvas, registers, review, run viewer)
-                                       │  REST + SSE
-                                       ▼
- ┌──────────────────────────── FastAPI backend ────────────────────────────┐
- │  API layer ─ scope + permission checks (Auth0 tokens, tenant/project)   │
- │  Domain services ─ versioned model + registers, changesets, guards      │
- │                                                                         │
- │  Router (one model call per message: which agent answers)               │
- │                                                                         │
- │  LangGraph agents                                                       │
- │   Business Requirements (ReAct) ◄── ask_requirements ──┐                │
- │   Architect (supervisor, ReAct + selective ToT) ───────┤                │
- │        │  review → correct → … → finalize              │                │
- │        ▼                                               │                │
- │   Validator (different model family, read-only)        │                │
- │   Transcript monitor (scores finished runs, triage)    │                │
- │                                                                         │
- │  Adapters ─ LLM (provider-neutral) · storage · extraction · embeddings  │
- └──────────────┬───────────────────────────────┬──────────────────────────┘
-                │                               │ stdio (MCP)
-                ▼                               ▼
-   PostgreSQL + pgvector              mysql_source MCP server ──► MySQL (read-only)
-   registers, revisions, evidence,    curated tools, no free-form SQL,
-   transcripts, checkpoints           personal-data masking
-```
+![kleandbm.ai architecture: a Router sends each message to the Business Requirements agent or the Architect; the Architect consults the Requirements agent, sends its candidate to the Validator and hands a proposal to a person; all three agents search documents, the Architect queries the MySQL MCP server, a monitor scores transcripts, and the model and its registers live in PostgreSQL](docs/images/architecture.svg)
+
+Around the agents sit a FastAPI backend (API, domain services, agents, persistence and adapters as separate layers, with core logic independent of HTTP), Auth0 with tenant and project permissions checked on every service call, a provider-neutral LLM adapter, and the React editor, which talks to the backend over REST and Server-Sent Events.
 
 | Part | Where | What it does |
 |---|---|---|
@@ -197,7 +174,7 @@ conda run -n kleandbm-agentic python ../eval/baseline/run.py --scenario meridian
 | `--prices FILE` | dollars per million tokens per model, to report cost |
 | `--langsmith` | trace runs to LangSmith with full content (synthetic data only) |
 
-Results go to `eval/baseline/results/<timestamp>/` (`report.md`, `summary.json`, one JSON per run). Each live run takes roughly 6–15 minutes. To calibrate the transcript monitor on saved runs:
+Results go to `eval/baseline/results/<timestamp>/` (`report.md`, `summary.json`, one JSON per run). Each live run takes roughly 7–14 minutes. To calibrate the transcript monitor on saved runs:
 
 ```bash
 conda run -n kleandbm-agentic python ../eval/monitor/calibrate.py ../eval/baseline/results/<folder>

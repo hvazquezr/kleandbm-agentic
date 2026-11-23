@@ -1,0 +1,94 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 760 640' width='760' height='640' font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif' font-size='13' role='img' aria-label='kleandbm.ai architecture'>
+<rect width='760' height='640' fill='#FFFFFF'/>
+<defs><marker id='arr' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#8A94A6'/></marker></defs>
+<text x='24' y='30' text-anchor='start' font-size='15' font-weight='600' fill='#1B2433'>Agents propose; only a person applies, confirms or accepts</text>
+<g fill='none' stroke='#8A94A6' stroke-width='1.25'>
+<path d='M380 100V128' marker-end='url(#arr)'/>
+<path d='M300 156H119V240' marker-end='url(#arr)'/>
+<path d='M380 184V240' marker-end='url(#arr)'/>
+<path d='M60 240V74H200' marker-end='url(#arr)'/>
+<path d='M468 240V100' marker-end='url(#arr)'/>
+<path d='M285 268H214' marker-end='url(#arr)'/>
+<path d='M214 300H285' marker-end='url(#arr)'/>
+<path d='M475 268H546' marker-end='url(#arr)'/>
+<path d='M546 300H475' marker-end='url(#arr)'/>
+<path d='M380 328V386' marker-end='url(#arr)'/>
+<path d='M119 328V386' marker-end='url(#arr)'/>
+<path d='M119 458V490' marker-end='url(#arr)'/>
+<path d='M641 490V458' marker-end='url(#arr)'/>
+</g>
+<rect x='200' y='48' width='360' height='52' rx='8' fill='#2F6FEB' fill-opacity='0.12' stroke='#2F6FEB' stroke-width='2'/>
+<text x='380' y='70' text-anchor='middle' font-weight='600' fill='#1B2433'>Person (editor or approver)</text>
+<text x='380' y='88' text-anchor='middle' font-size='11.5' fill='#1B2433'>confirms meanings, applies designs, accepts</text>
+<rect x='300' y='128' width='160' height='56' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='380' y='148' text-anchor='middle' font-weight='600' fill='#1B2433'>Router</text>
+<text x='380' y='164' text-anchor='middle' font-size='11.5' fill='#5B6577'>Haiku 5.5, one call</text>
+<text x='380' y='178' text-anchor='middle' font-size='11.5' fill='#5B6577'>picks one or both agents</text>
+<rect x='24' y='240' width='190' height='88' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='119' y='264' text-anchor='middle' font-weight='600' fill='#1B2433'>Business Requirements</text>
+<text x='119' y='280' text-anchor='middle' font-size='11.5' fill='#5B6577'>ReAct, Claude Opus 5.5</text>
+<text x='119' y='296' text-anchor='middle' font-size='11.5' fill='#5B6577'>requirements, definitions</text>
+<text x='119' y='312' text-anchor='middle' font-size='11.5' fill='#5B6577'>questions</text>
+<rect x='285' y='240' width='190' height='88' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='380' y='264' text-anchor='middle' font-weight='600' fill='#1B2433'>Architect (supervisor)</text>
+<text x='380' y='280' text-anchor='middle' font-size='11.5' fill='#5B6577'>ReAct + selective ToT</text>
+<text x='380' y='296' text-anchor='middle' font-size='11.5' fill='#5B6577'>edits a design candidate</text>
+<text x='380' y='312' text-anchor='middle' font-size='11.5' fill='#5B6577'>decisions, feasibility</text>
+<rect x='546' y='240' width='190' height='88' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='641' y='264' text-anchor='middle' font-weight='600' fill='#1B2433'>Validator</text>
+<text x='641' y='280' text-anchor='middle' font-size='11.5' fill='#5B6577'>gpt-6-astra, read-only</text>
+<text x='641' y='296' text-anchor='middle' font-size='11.5' fill='#5B6577'>findings, claim review</text>
+<text x='641' y='312' text-anchor='middle' font-size='11.5' fill='#5B6577'>reads docs and sources</text>
+<rect x='24' y='386' width='190' height='72' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='119' y='410' text-anchor='middle' font-weight='600' fill='#1B2433'>Document search</text>
+<text x='119' y='426' text-anchor='middle' font-size='11.5' fill='#5B6577'>pgvector, cited passages</text>
+<text x='119' y='442' text-anchor='middle' font-size='11.5' fill='#5B6577'>used by all three agents</text>
+<rect x='285' y='386' width='190' height='72' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='380' y='410' text-anchor='middle' font-weight='600' fill='#1B2433'>MySQL MCP server</text>
+<text x='380' y='426' text-anchor='middle' font-size='11.5' fill='#5B6577'>curated read-only tools</text>
+<text x='380' y='442' text-anchor='middle' font-size='11.5' fill='#5B6577'>personal data masked</text>
+<rect x='546' y='386' width='190' height='72' rx='8' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='641' y='410' text-anchor='middle' font-weight='600' fill='#1B2433'>Transcript monitor</text>
+<text x='641' y='426' text-anchor='middle' font-size='11.5' fill='#5B6577'>scores runs, never blocks</text>
+<text x='641' y='442' text-anchor='middle' font-size='11.5' fill='#5B6577'>another model family</text>
+<rect x='24' y='490' width='712' height='134' rx='8' fill='#F3F5F9' stroke='#8A94A6' stroke-width='1.25'/>
+<text x='380' y='512' text-anchor='middle' font-weight='600' fill='#1B2433'>PostgreSQL + pgvector: the model and its registers, versioned and attributed</text>
+<rect x='40' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(80.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2'/><path d='M3 9h18M3 15h18M9 3v18'/></g>
+<text x='91.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Data model</text>
+<text x='91.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>tables, keys, grain</text>
+<rect x='155' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(195.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='8' y='2' width='8' height='4' rx='1'/><path d='M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2'/><path d='M12 11h4M12 16h4M8 11h.01M8 16h.01'/></g>
+<text x='206.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Requirements</text>
+<text x='206.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>support status</text>
+<rect x='270' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(310.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 7v14'/><path d='M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z'/></g>
+<text x='321.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Definitions</text>
+<text x='321.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>origin, confirmed?</text>
+<rect x='385' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(425.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'/><path d='M12 17h.01'/></g>
+<text x='436.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Questions</text>
+<text x='436.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>open, blocking</text>
+<rect x='500' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(540.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z'/><path d='m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z'/><path d='M7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2'/></g>
+<text x='551.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Decisions</text>
+<text x='551.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>with evidence</text>
+<rect x='615' y='524' width='103' height='72' rx='6' fill='#FFFFFF' stroke='#8A94A6' stroke-width='1'/>
+<g transform='translate(655.5 531) scale(0.92)' fill='none' stroke='#2F6FEB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/><path d='m9 12 2 2 4-4'/></g>
+<text x='666.5' y='571' text-anchor='middle' font-size='12' font-weight='600' fill='#1B2433'>Checks</text>
+<text x='666.5' y='586' text-anchor='middle' font-size='10.5' fill='#5B6577'>pass, fail, unverified</text>
+<text x='380' y='614' text-anchor='middle' font-size='11.5' fill='#5B6577'>also changesets, document passages, source evidence, transcripts, checkpoints</text>
+<text x='372' y='119' text-anchor='end' font-size='11.5' fill='#5B6577'>every message</text>
+<text x='210' y='149' text-anchor='middle' font-size='11.5' fill='#5B6577'>route</text>
+<text x='388' y='216' text-anchor='start' font-size='11.5' fill='#5B6577'>route</text>
+<text x='70' y='67' text-anchor='start' font-size='11.5' fill='#5B6577'>replies, questions</text>
+<text x='476' y='214' text-anchor='start' font-size='11.5' fill='#5B6577'>proposal</text>
+<text x='249' y='261' text-anchor='middle' font-size='11.5' fill='#5B6577'>consults</text>
+<text x='249' y='317' text-anchor='middle' font-size='11.5' fill='#5B6577'>answer</text>
+<text x='510' y='261' text-anchor='middle' font-size='11.5' fill='#5B6577'>candidate</text>
+<text x='510' y='317' text-anchor='middle' font-size='11.5' fill='#5B6577'>findings</text>
+<text x='388' y='362' text-anchor='start' font-size='11.5' fill='#5B6577'>evidence</text>
+<text x='127' y='362' text-anchor='start' font-size='11.5' fill='#5B6577'>search, read</text>
+<text x='127' y='478' text-anchor='start' font-size='11.5' fill='#5B6577'>passages</text>
+<text x='649' y='478' text-anchor='start' font-size='11.5' fill='#5B6577'>transcripts</text>
+</svg>
