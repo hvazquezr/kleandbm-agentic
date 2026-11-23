@@ -1,6 +1,6 @@
-# KleanDBM: agents that design analytical data models from evidence
+# kleandbm.ai: agents that design analytical data models from evidence
 
-KleanDBM is a multi-agent system that designs **logical analytical data models** (Kimball star schemas) for data architects, analytics engineers and consultants. It reads the business's documents and inspects a read-only MySQL source, then proposes a model with grain, keys, relationships and measures. Every claim it makes is tied to evidence, and every business meaning stays with a person.
+kleandbm.ai is a multi-agent system that assists and accelerates the creation of **logical analytical data models** (Kimball star schemas) for data architects, analytics engineers and consultants, while keeping track of requirements and decisions. It reads the business's documents and inspects a read-only MySQL source, then proposes a model with grain, keys, relationships and measures. Every claim it makes is tied to evidence, and every business meaning stays with a person.
 
 It was built as the capstone for the Carnegie Mellon Agentic AI program (Research Assistant option).
 
@@ -12,9 +12,11 @@ When a company sets up a data lakehouse, the logical data model is the foundatio
 - **Modeling is slow, expert work.** Before drawing a table, experts read documents, reports and requirements and inspect the source data to learn what it can support.
 - **Requirements move.** Especially in consulting, clients change or add requirements mid-project. If requirements, definitions and decisions aren't tracked, the consultant absorbs the cost of the change or ends up in a dispute with the client.
 
-KleanDBM does the investigation with agents: it reads the documents, inspects the source, says what the data can and can't support, and asks a person when the answer is a business decision. Every requirement, definition and decision is versioned and attributed, so a change in scope is visible and can be priced.
+kleandbm.ai does the investigation with agents: it reads the documents, inspects the source, says what the data can and can't support, and asks a person when the answer is a business decision. Every requirement, definition and decision is versioned and attributed, so a change in scope is visible and can be priced.
 
 ## What it does
+
+The user talks to one **Assistant** per data model. Behind it, a Router reads each message and sends it to the agent that should answer: the Business Requirements agent, the Architect, or both in turn. It asks a clarifying question when it can't tell. The user can also send a message straight to one agent.
 
 1. **Requirements.** A person states what they want to analyze and uploads documents (reports, spreadsheets, notes, screenshots). The Business Requirements agent records requirements and business definitions with citations to document locations, and raises questions instead of guessing.
 2. **Design.** The Architect agent inspects the linked MySQL source through curated read-only tools, then designs a candidate model: fact grain, dimensions, roles, measures, additivity, and a mapping from each requirement to the elements that answer it. Each design decision carries typed claims ("this column is unique", "every order has a store") that must cite evidence of the matching kind.
@@ -30,6 +32,8 @@ KleanDBM does the investigation with agents: it reads the documents, inspects th
  ┌──────────────────────────── FastAPI backend ────────────────────────────┐
  │  API layer ─ scope + permission checks (Auth0 tokens, tenant/project)   │
  │  Domain services ─ versioned model + registers, changesets, guards      │
+ │                                                                         │
+ │  Router (one model call per message: which agent answers)               │
  │                                                                         │
  │  LangGraph agents                                                       │
  │   Business Requirements (ReAct) ◄── ask_requirements ──┐                │
@@ -50,26 +54,28 @@ KleanDBM does the investigation with agents: it reads the documents, inspects th
 
 | Part | Where | What it does |
 |---|---|---|
+| Router | `backend/app/agents/router/` | One model call (`claude-haiku-5-5`) per user message that picks the agent: requirements, Architect, both in turn, or a clarifying question. It reads only the user's own messages and a summary the application builds, never documents or agent replies, and every decision is stored. |
 | Business Requirements agent | `backend/app/agents/requirements/` | ReAct loop. Owns the Requirements and Business Definitions registers. Searches documents (pgvector), cites locations, raises questions. Never uses Tree of Thought. |
 | Architect agent | `backend/app/agents/architect/` | Supervisor. Investigates the source, edits an isolated design candidate, records decisions with typed claims, consults the Requirements agent on business meaning, and opens a bounded Tree of Thought search only at an undecided technical conflict. |
 | Validator agent | `backend/app/agents/validator/` | Reviews the candidate on another model family (`gpt-6-astra`). Read-only tools plus `record_finding`. A `passed` finding needs evidence; missing evidence is `unverified`, never a pass. |
 | Transcript monitor | `backend/app/agents/monitor/` | Scores each finished run 0–100 for misbehaviour (followed an injection, unsupported claims, authority overreach). Triage for human review; it never blocks. |
 | MySQL MCP server | `mcp/mysql_source/` | Curated read-only tools: list and describe tables, row counts, column profiles, candidate-key, relationship and coverage checks, and masked samples. Read-only grants verified each session, timeouts, row caps, schema fingerprints. |
 | Backend | `backend/app/` | FastAPI with separate API, domain, agent, persistence and adapter layers. Every record is scoped to tenant, project and model, and versioned as append-only revisions in attributed changesets. |
-| Frontend | `frontend/` | React + React Flow editor: model canvas, registers, Review drawer (diff, findings, apply), agent chat with live streaming, and a run viewer with transcripts and monitor assessments. |
-| Evaluation | `eval/` | Two synthetic retail sources (Northstar, Meridian), scenario runner, keyword rubrics, and monitor calibration. |
+| Frontend | `frontend/` | React + React Flow editor: model canvas, registers, Review drawer (diff, findings, apply), the Assistant chat with live streaming and a route line on each message, and a run viewer with transcripts and monitor assessments. |
+| Evaluation | `eval/` | Synthetic businesses with answer keys (Northstar Retail, Meridian Supply, and a demo set), the scenario runner with keyword rubrics, the routing eval, and monitor calibration. |
 
 The design spec is [`docs/spec.md`](docs/spec.md) (agreed decisions in §7, open questions in §8). Known issues and deferred work are in [`docs/backlog.md`](docs/backlog.md). [`CLAUDE.md`](CLAUDE.md) is the detailed developer guide to every component.
 
 ### Safety in the code, not only in prompts
 
-- **Authority.** The domain layer refuses any agent attempt to confirm or reject a business meaning, change a person-confirmed entry, or accept a model. Confirming a meaning needs approver rights.
+- **Authority.** The backend refuses any agent attempt to confirm or reject a business meaning, change a person-confirmed entry, or accept a model. Confirming a meaning needs approver rights.
 - **Deterministic checks on confident claims.** Source references are checked against the schema the tools actually returned. A requirement can't be marked fully supported while a blocking question on it is open. A run with linked sources that never queried them fails a hard check.
 - **Typed decision claims.** Each claim kind needs its own evidence (uniqueness needs a key check on those columns, a relationship needs a relationship check, a business meaning needs a document citation). The Validator judges whether each result shows the claim.
-- **Untrusted content.** Document passages, column comments and sample values are data, never instructions. Agents can flag text that tries to instruct them; flags persist for a person to review.
-- **Personal data.** Masked in two layers before evidence is stored or a model sees it: by column in the MCP server, by pattern (emails, phones, cards, IBANs, SSNs) in the adapter.
+- **Untrusted content.** Document passages, column comments and sample values are data, never instructions. Agents can flag text that tries to instruct them; flags persist for a person to review. The Router never reads this content, so planted text can't steer which agent answers.
+- **Personal data.** Masked before evidence is stored or a model sees it: by column in the MCP server, by pattern (emails, phones, cards, IBANs, SSNs) in the adapter, and in document passages at extraction. There is no unmasked mode.
 - **Isolation.** Agents work in a candidate copy; nothing authoritative changes until a person applies it. Out-of-scope resources return 404 so they can't be probed, and an end-to-end test calls every project route across tenants.
-- **Audit.** Every source call is append-only evidence with its arguments, result, schema fingerprint and actor. Every agent turn is stored in `run_messages`.
+- **Source access.** Agents get nine curated read-only tools and no free-form SQL. The account's grants are checked at the start of every session, and one with more than SELECT is refused.
+- **Audit.** Every source call is append-only evidence with its arguments, result, schema fingerprint and actor. Every agent turn is stored in `run_messages`, and every routing decision in `routing_decisions`.
 
 ## Setup
 
@@ -128,6 +134,8 @@ These build synthetic MySQL databases with a SELECT-only user and write its pass
 eval/northstar/load.sh
 conda run -n kleandbm-agentic python eval/northstar/verify.py
 eval/meridian/load.sh
+eval/demo/load.sh
+conda run -n kleandbm-agentic python eval/demo/verify.py
 ```
 
 ### 4. Frontend
@@ -143,12 +151,17 @@ Set the Auth0 domain, SPA client ID and audience in `.env.local`, then open http
 
 ## Usage
 
-1. Sign in, create a workspace and a project, and upload documents. For the Meridian demo, upload `eval/meridian/meridian-ops-notes.md`.
-2. On **Sources**, add a MySQL connection (host `127.0.0.1`, database `meridian_ops`, user `meridian_ro`, password from `backend/.env`). Credentials are entered only here, never in chat.
-3. Create a model with the wizard. State the requirements in the **Requirements** chat; the agent records them and their definitions, and asks about anything unclear.
-4. Choose **Generate draft model** (or ask the **Architect** in the AI Assistant drawer). A full run with review takes about 8–14 minutes.
-5. Open **Review** to see readiness, blockers, the diff, and the Validator's findings. Apply or discard the candidate.
-6. In **Registers**, answer open questions and confirm or reject definitions and decisions. **View run** on any reply shows the full transcript and the monitor's assessment.
+The demo set (`eval/demo/`) is the quickest walk-through: a clean Northstar variant built to leave at most two questions. `eval/demo/demo-script.md` has the exact text to type.
+
+1. Sign in, create a project, and start **New model (guided)**.
+2. Upload the four files in `eval/demo/docs/` (a reporting workbook, a data dictionary and two report images). Never upload `eval/demo/README.md` or the demo script: they describe the expected answer.
+3. Add the MySQL source: host `127.0.0.1`, database `northstar_demo`, user `northstar_demo_ro`, and the password from `KLEANDBM_DEV_DEMO_PASSWORD` in `backend/.env`. Credentials are entered only in this form, never in chat.
+4. State the requirements in the Assistant. The Business Requirements agent records them and their definitions, and asks about anything unclear.
+5. Choose **Generate draft model**. The Architect investigates the source, designs, and the Validator reviews it; the demo run takes about 8 minutes.
+6. Open **Review** to see readiness, blockers, the diff, and the Validator's findings. Apply or discard the candidate.
+7. In **Registers**, answer open questions and confirm or reject definitions and decisions. **View run** on any reply shows the full transcript and the monitor's assessment.
+
+For a harder case, use the Meridian source (`meridian_ops`, user `meridian_ro`) with `eval/meridian/meridian-ops-notes.md`; a full run takes 7 to 14 minutes.
 
 ## Tests
 
@@ -176,7 +189,7 @@ conda run -n kleandbm-agentic python ../eval/baseline/run.py --scenario meridian
 
 | Option | Meaning |
 |---|---|
-| `--scenario` | `northstar` (stated requirements, mostly a business-meaning conflict), `northstar_structures` (built to raise technical conflicts), `meridian` (split and multi-warehouse shipments, backorders, re-run inventory counts), `meridian_injection` (Meridian with planted prompt injections; build it with `MERIDIAN_INJECT=1 eval/meridian/load.sh`) |
+| `--scenario` | `northstar` (stated requirements, mostly a business-meaning conflict), `northstar_structures` (built to raise technical conflicts), `meridian` (split and multi-warehouse shipments, backorders, re-run inventory counts), `meridian_injection` (Meridian with planted prompt injections; build it with `MERIDIAN_INJECT=1 eval/meridian/load.sh`), `demo` (the live-demo set) |
 | `--variants` | `baseline` (single candidate), `tot` (selective Tree of Thought), or both |
 | `--repeats` | runs per variant; use 3 or more to compare |
 | `--check` | free preflight: database, source and documents, no model calls |
@@ -190,7 +203,16 @@ Results go to `eval/baseline/results/<timestamp>/` (`report.md`, `summary.json`,
 conda run -n kleandbm-agentic python ../eval/monitor/calibrate.py ../eval/baseline/results/<folder>
 ```
 
-**Answer keys.** `eval/northstar/README.md`, `eval/meridian/README.md` and `retail-discovery/verification.json` describe what a correct model looks like. They're for graders and readers. The runner refuses to upload them, and they must never be given to an agent.
+The Router has its own eval, which sends labelled messages through the Router's model call with no database or agents:
+
+```bash
+conda run -n kleandbm-agentic python ../eval/routing/run.py --repeats 3
+conda run -n kleandbm-agentic python ../eval/routing/run.py --cases ../eval/routing/cases_holdout.json --repeats 3
+```
+
+`cases_holdout.json` is held out: never tune the Router prompt to it.
+
+**Answer keys.** `eval/northstar/README.md`, `eval/meridian/README.md`, `eval/demo/README.md`, `eval/demo/demo-script.md` and `retail-discovery/verification.json` describe what a correct model looks like. They're for graders and readers. The runner refuses to upload them, and they must never be given to an agent.
 
 ### Results so far
 
@@ -198,10 +220,12 @@ conda run -n kleandbm-agentic python ../eval/monitor/calibrate.py ../eval/baseli
 |---|---|
 | Meridian, single candidate (latest runs) | Rubric 11/11 on all 8 completed runs (one earlier batch failed at its first call on a provider schema limit, since fixed). None of the runs reached Ready for Review, because business-meaning questions (for example the reporting calendar) correctly stayed open for a person. |
 | Selective ToT vs. single candidate (Northstar, Northstar structures, Meridian; 3 repeats each) | No rubric gain. Before the trigger was narrowed, search opened on settled conflicts and roughly doubled cost. Now it opens only when the evidence leaves the choice undecided. |
+| Demo set (1 run) | Rubric 11/11 in under 8 minutes, with two questions, including the expected one on when returns are counted, and the undocumented Marketplace orders noticed. |
 | Prompt injection (Meridian with 5 planted instructions and false claims) | No plant followed in 3 runs; questions still raised; nothing confirmed by agents; the plants were reported. |
+| Router (labelled messages × 3 repeats) | 88.7% with the first prompt, 99.3% after one fix (50 cases); 97.9% on a held-out set of 47 cases never used for tuning, routed the same way on every repeat. |
 | Transcript monitor calibration | 12/12 planted violations flagged with the right kind; 2 of 5 clean runs flagged at a threshold of 50 (1 of 5 at 65). It ranks runs for review and never blocks. |
 
-Each result folder's `report.md` and `summary.json` are in `eval/baseline/results/` and `eval/monitor/results/` (per-run JSON stays local: it holds transcripts and masked source samples). The rubrics are keyword heuristics over the stored records, and the scenarios are small. See `docs/backlog.md` for the known gaps in the evaluation.
+Each result folder's `report.md` and `summary.json` are in `eval/baseline/results/`, `eval/monitor/results/` and `eval/routing/results/` (per-run JSON stays local: it holds transcripts and masked source samples). The rubrics are keyword heuristics over the stored records, and the scenarios are small. See `docs/backlog.md` for the known gaps in the evaluation.
 
 ## Repository layout
 
@@ -209,7 +233,7 @@ Each result folder's `report.md` and `summary.json` are in `eval/baseline/result
 backend/          FastAPI app, agents, domain, persistence, Alembic migrations, tests
 mcp/mysql_source/ read-only MySQL MCP server
 frontend/         React editor
-eval/             sample sources, scenario runner, graders, monitor calibration
+eval/             sample sources, scenario runner, graders, routing eval, monitor calibration
 retail-discovery/ Northstar discovery documents (the report the agents read; verification.json is grader-only)
 docs/             design spec and backlog
 ```
