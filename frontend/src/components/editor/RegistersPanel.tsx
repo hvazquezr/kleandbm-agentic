@@ -191,6 +191,7 @@ export function RegistersPanel({
               <Badge variant="outline" className="font-normal">{humanize(q.data.kind)}</Badge>
               {q.data.is_blocking && <Badge variant="destructive">blocking</Badge>}
             </div>
+            <QuestionLinks id={q.id} trace={trace} onSelect={onSelectRecord} />
           </Item>
         ))}
       </Section>
@@ -233,6 +234,28 @@ export function RegistersPanel({
       </Section>
       )}
     </div>
+  );
+}
+
+/** What a question is tied to: the requirements and definitions it concerns, the decisions and
+ *  assumptions standing in for its answer, and the validation checks that name it. These are
+ *  what to revisit once it's answered. */
+function QuestionLinks({ id, trace, onSelect }: {
+  id: string; trace: ReturnType<typeof buildTrace>; onSelect: (id: string) => void;
+}) {
+  const ordered = (ids: string[]) =>
+    [...new Set(ids)].sort((a, b) => trace.label(a).localeCompare(trace.label(b), undefined, { numeric: true }));
+  const concerns = ordered(trace.linksFrom(id, "concerns"));
+  const of = (kind: string) => concerns.filter((c) => trace.kindOf(c) === kind);
+  const other = concerns.filter((c) => !["requirement", "definition"].includes(trace.kindOf(c) ?? ""));
+  return (
+    <>
+      <Traced label="Requirements" ids={of("requirement")} trace={trace} onSelect={onSelect} />
+      <Traced label="Definitions" ids={of("definition")} trace={trace} onSelect={onSelect} />
+      <Traced label="Model" ids={other} trace={trace} onSelect={onSelect} />
+      <Traced label="Decisions" ids={ordered(trace.linksTo(id, "affects"))} trace={trace} onSelect={onSelect} />
+      <Traced label="Checks" ids={ordered(trace.linksTo(id, "checks"))} trace={trace} onSelect={onSelect} />
+    </>
   );
 }
 

@@ -15,6 +15,10 @@ export type Trace = {
   /** What a check covers. */
   checked: (checkId: string) => string[];
   kindOf: (id: string) => string | undefined;
+  /** Records this one links to with the given link type. */
+  linksFrom: (id: string, linkType: string) => string[];
+  /** Records that link to this one with the given link type. */
+  linksTo: (id: string, linkType: string) => string[];
 };
 
 export function buildTrace(snap: Snapshot): Trace {
@@ -57,5 +61,7 @@ export function buildTrace(snap: Snapshot): Trace {
       return [...found].map((id) => checksById.get(id)).filter((c) => c !== undefined);
     },
     checked: (cid) => links.filter((l) => l.link_type === "checks" && l.from_id === cid).map((l) => l.to_id),
+    linksFrom: (id, type) => links.filter((l) => l.link_type === type && l.from_id === id).map((l) => l.to_id),
+    linksTo: (id, type) => links.filter((l) => l.link_type === type && l.to_id === id).map((l) => l.from_id),
   };
 }
